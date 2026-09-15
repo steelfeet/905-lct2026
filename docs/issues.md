@@ -1,5 +1,5 @@
-
-
+https://steelfeet.ru/submodules/905-lct2026/init_users.php
+https://steelfeet.ru/submodules/905-lct2026/index.php
 
 
 описание проекта: submodules/905-lct2026/readme.md, техническое задание submodules/905-lct2026/docs/tz.md. База данных прототипа SQLite.
@@ -9,6 +9,8 @@
 Представитель ВУЗа - login:Pavel; pass:2222
 "Руководитель" - login:Olga; pass:333
 "Администратор" - login:Alex; pass:4444
+v.0.6.0.372 [init] [905-lct2026] ✅ DONE
 
-v.0.6.0.372 [init] [905-lct2026]
- ✅ DONE
+ок, стилизуй форму входа под стиль корневого сайта 
+v.0.6.0.373 [design] [905-lct2026]
+
