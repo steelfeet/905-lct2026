@@ -90,6 +90,109 @@ function e(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
+
+// ===== Workflow текущего проекта ===========================================
+// 14 шагов базового workflow по ТЗ (раздел 5.1): номер, название, сторона.
+
+$workflowSteps = [
+    ['num' => 1,  'name' => 'Поиск контактов ответственного в вузе',   'side' => 'internal'],
+    ['num' => 2,  'name' => 'Коммуникация и уточнение актуальности программ', 'side' => 'both'],
+    ['num' => 3,  'name' => 'Организация встречи',                     'side' => 'both'],
+    ['num' => 4,  'name' => 'Обмен документами',                       'side' => 'both'],
+    ['num' => 5,  'name' => 'Корректировка документов',                'side' => 'both'],
+    ['num' => 6,  'name' => 'Подписание документов',                   'side' => 'both'],
+    ['num' => 7,  'name' => 'Передача материалов, лицензий, документации', 'side' => 'external'],
+    ['num' => 8,  'name' => 'Сопровождение внедрения',                 'side' => 'both'],
+    ['num' => 9,  'name' => 'Обучение преподавателей',                 'side' => 'both'],
+    ['num' => 10, 'name' => 'Актуализация учебной программы',          'side' => 'both'],
+    ['num' => 11, 'name' => 'Ведение занятий',                         'side' => 'external'],
+    ['num' => 12, 'name' => 'Актуализация документации',               'side' => 'both'],
+    ['num' => 13, 'name' => 'Повышение квалификации преподавателей',   'side' => 'both'],
+    ['num' => 14, 'name' => 'Контроль исполнения',                     'side' => 'internal'],
+];
+
+// Текущий проект (взаимодействие «вуз + продукт») — выбирается в шапке панели.
+$projectOptions = $pdo->query(
+    'SELECT i.id, i.phase_id, u.name AS university_name, p.name AS product_name
+     FROM interactions i
+     JOIN universities u ON u.id = i.university_id
+     JOIN it_products  p ON p.id = i.product_id
+     ORDER BY i.id'
+)->fetchAll();
+
+// Готовое название для выпадающего списка выбора текущего проекта.
+foreach ($projectOptions as &$opt) {
+    $opt['title'] = $opt['university_name'] . ' · ' . $opt['product_name'];
+}
+unset($opt);
+
+$currentProjectId = 0;
+foreach ($projectOptions as $opt) {
+    if ((int) $opt['id'] === (int) ($_GET['project'] ?? 0)) {
+        $currentProjectId = (int) $opt['id'];
+        break;
+    }
+}
+if ($currentProjectId === 0 && $projectOptions !== []) {
+    $currentProjectId = (int) $projectOptions[0]['id'];
+}
+
+$currentProject = ['id' => $currentProjectId, 'title' => 'нет активных проектов', 'phase' => null];
+$currentPhaseNum = 0;
+
+foreach ($projectOptions as $opt) {
+    if ((int) $opt['id'] === $currentProjectId) {
+        $currentProject['title'] = $opt['university_name'] . ' · ' . $opt['product_name'];
+        $currentProject['phase'] = $opt['phase_id'] !== null ? ($phaseById[(int) $opt['phase_id']] ?? null) : null;
+        if ($currentProject['phase'] !== null) {
+            $currentPhaseNum = (int) $currentProject['phase']['num'];
+        }
+        break;
+    }
+}
+
+// Рабочие состояния шагов для текущего этапа (демонстрация двунаправленности).
+$stepStates = [
+    'completed'        => ['label' => 'Завершён',        'color' => '#16a34a', 'fill' => 100],
+    'in_progress'      => ['label' => 'В работе',        'color' => '#2563eb', 'fill' => 60],
+    'waiting_internal' => ['label' => 'Ждёт ИТ Школу',   'color' => '#8b6914', 'fill' => 40],
+    'waiting_external' => ['label' => 'Ждёт вуз',        'color' => '#d97706', 'fill' => 40],
+    'needs_revision'   => ['label' => 'Требует доработки', 'color' => '#dc2626', 'fill' => 25],
+    'pending'          => ['label' => 'Ожидает',         'color' => '#d1d5db', 'fill' => 0],
+];
+
+// Детерминированное состояние текущего шага по id проекта.
+$currentStates = ['in_progress', 'waiting_external', 'needs_revision'];
+$currentState = $currentStates[$currentProjectId % count($currentStates)];
+
+$sideLabels = [
+    'internal' => 'Внутренний контур — ИТ Школа РТК',
+    'external' => 'Внешний контур — вуз',
+    'both'     => 'Совместный шаг — ИТ Школа РТК + вуз',
+];
+
+$workflow = [];
+foreach ($workflowSteps as $step) {
+    if ($step['num'] < $currentPhaseNum) {
+        $state = 'completed';
+    } elseif ($step['num'] === $currentPhaseNum) {
+        $state = $currentState;
+    } else {
+        $state = 'pending';
+    }
+
+    $workflow[] = [
+        'num'        => $step['num'],
+        'name'       => $step['name'],
+        'side'       => $step['side'],
+        'sideLabel'  => $sideLabels[$step['side']],
+        'state'      => $state,
+        'stateLabel' => $stepStates[$state]['label'],
+        'color'      => $stepStates[$state]['color'],
+        'fill'       => $stepStates[$state]['fill'],
+        'isCurrent'  => $step['num'] === $currentPhaseNum,
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -331,16 +434,224 @@ function e(string $value): string
 
         .content__subtitle { color: var(--color-tertiary); font-size: 0.95rem; }
 
+        /* ===== Главное окно: workflow (верхняя четверть) + сетка (нижние 3/4) ===== */
+        .workspace {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-md);
+            min-height: calc(100vh - 46px); /* минус высота шапки */
+        }
+
+        .panel {
+            background-color: var(--color-white);
+            border: 1px solid rgba(26, 26, 26, 0.1);
+            padding: var(--space-md);
+        }
+
+        .panel--workflow {
+            flex: 0 0 25%;
+            min-height: 230px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel--matrix {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel__head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: var(--space-sm);
+            margin-bottom: var(--space-sm);
+        }
+
+        .panel__title { font-size: 1.4rem; }
+
+        .panel__subtitle { color: var(--color-tertiary); font-size: 0.85rem; }
+
+        /* ===== Workflow текущего проекта ===== */
+        .project-select { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+
+        .project-select select {
+            padding: 0.4rem 0.6rem;
+            border: 1px solid rgba(26, 26, 26, 0.15);
+            background-color: var(--color-white);
+            font-family: var(--font-sans);
+            font-size: 0.85rem;
+            max-width: 380px;
+        }
+
+        .workflow-scroll {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .workflow-track {
+            display: flex;
+            align-items: stretch;
+            gap: 4px;
+            overflow-x: auto;
+            padding: 4px 2px 8px;
+        }
+
+        .wstep {
+            position: relative;
+            flex: 1 0 96px;
+            max-width: 130px;
+            min-height: 108px;
+            border: 1px solid rgba(26, 26, 26, 0.12);
+            border-top: 4px solid rgba(26, 26, 26, 0.2);
+            background-color: var(--color-light);
+            padding: 26px 6px 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            transition: var(--transition-base);
+        }
+
+        .wstep:hover { border-color: var(--color-accent); }
+
+        .wstep.current {
+            border-color: var(--color-accent);
+            background-color: rgba(139, 105, 20, 0.06);
+            box-shadow: 0 0 0 1px var(--color-accent);
+        }
+
+        .wstep__num {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--color-tertiary);
+        }
+
+        .wstep.current .wstep__num { color: var(--color-accent-dark); }
+
+        .wstep__side {
+            position: absolute;
+            top: 4px;
+            right: 6px;
+            font-size: 0.6rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            padding: 1px 5px;
+            border: 1px solid rgba(26, 26, 26, 0.25);
+            color: var(--color-secondary);
+            background-color: var(--color-white);
+        }
+
+        .wstep__side--both { border-color: var(--color-accent); color: var(--color-accent-dark); }
+
+        .wstep__name {
+            font-size: 0.7rem;
+            line-height: 1.25;
+            color: var(--color-secondary);
+            overflow: hidden;
+        }
+
+        .wstep__status {
+            margin-top: auto;
+            font-size: 0.62rem;
+            font-weight: 500;
+            padding: 1px 5px;
+            border: 1px solid rgba(26, 26, 26, 0.2);
+            background-color: var(--color-white);
+            align-self: flex-start;
+            white-space: nowrap;
+        }
+
+        .wstep__bar { height: 6px; background-color: rgba(26, 26, 26, 0.08); }
+
+        .wstep__bar-fill { height: 100%; }
+
+        .wstep__flag {
+            position: absolute;
+            top: -7px;
+            right: 22px;
+            font-size: 0.6rem;
+            font-weight: 700;
+            color: var(--color-accent-dark);
+        }
+
+        /* Рабочие состояния шагов (демонстрация визуализации этапов) */
+        .wstep--completed { border-top-color: #16a34a; }
+        .wstep--completed .wstep__status { border-color: #16a34a; color: #15803d; }
+
+        .wstep--in_progress { border-top-color: #2563eb; }
+        .wstep--in_progress .wstep__status { border-color: #2563eb; color: #1d4ed8; }
+
+        .wstep--waiting_internal { border-top-color: var(--color-accent); }
+        .wstep--waiting_internal .wstep__status { border-color: var(--color-accent); color: var(--color-accent-dark); }
+
+        .wstep--waiting_external { border-top-color: #d97706; }
+        .wstep--waiting_external .wstep__status { border-color: #d97706; color: #b45309; }
+
+        .wstep--needs_revision { border-top-color: #dc2626; }
+        .wstep--needs_revision .wstep__status { border-color: #dc2626; color: #b91c1c; }
+
+        .wstep--pending { border-top-color: rgba(26, 26, 26, 0.2); opacity: 0.85; }
+
+        /* Легенда состояний workflow */
+        .wf-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem var(--space-md);
+            margin-top: auto;
+            padding-top: var(--space-xs);
+            border-top: 1px solid rgba(26, 26, 26, 0.08);
+        }
+
+        .wf-legend__item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.72rem;
+            color: var(--color-secondary);
+        }
+
+        .wf-legend__dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* Легенда фаз в верхней панели workflow (по фазам, а не по состояниям) */
+        .wf-legend__swatch {
+            width: 12px;
+            height: 12px;
+            border: 1px solid rgba(26, 26, 26, 0.2);
+            flex-shrink: 0;
+        }
+
         /* ===== Матрица «вуз × продукт» ===== */
+        .matrix-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            border: 1px solid rgba(26, 26, 26, 0.1);
+        }
+
         table.matrix {
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
             font-size: 0.8rem;
             background-color: var(--color-white);
         }
 
         table.matrix th,
         table.matrix td {
-            border: 1px solid rgba(26, 26, 26, 0.1);
+            border-right: 1px solid rgba(26, 26, 26, 0.1);
+            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
             padding: 0.5rem 0.65rem;
             text-align: center;
             white-space: nowrap;
@@ -352,6 +663,7 @@ function e(string $value): string
             font-weight: 500;
             position: sticky;
             top: 0;
+            z-index: 2;
         }
 
         table.matrix tbody th {
@@ -360,10 +672,13 @@ function e(string $value): string
             font-weight: 500;
             position: sticky;
             left: 0;
+            z-index: 1;
             max-width: 280px;
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
+        table.matrix thead th:first-child { z-index: 3; }
 
         table.matrix td {
             color: var(--color-primary);
@@ -383,10 +698,11 @@ function e(string $value): string
 
         /* ===== Легенда фаз ===== */
         .legend {
-            margin-top: var(--space-lg);
-            padding: var(--space-md);
+            margin-top: var(--space-md);
+            padding: var(--space-sm) var(--space-md);
             background-color: var(--color-light);
             border: 1px solid rgba(26, 26, 26, 0.1);
+            flex-shrink: 0;
         }
 
         .legend__title {
@@ -476,59 +792,128 @@ function e(string $value): string
         </nav>
 
         <main class="content">
-            <div class="content__header">
-                <h2 class="content__title">Карта взаимодействий</h2>
-                <p class="content__subtitle">
-                    Строки — вузы, столбцы — ИТ-продукты. Цвет клетки показывает текущую фазу
-                    взаимодействия; «—» означает, что взаимодействие не начато.
-                </p>
-            </div>
-
-            <table class="matrix">
-                <thead>
-                    <tr>
-                        <th>Вуз \ Продукт</th>
-                        <?php foreach ($products as $product): ?>
-                            <th title="<?= e($product['name']) ?>"><?= e($product['name']) ?></th>
-                        <?php endforeach; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($universities as $university): ?>
-                        <tr>
-                            <th title="<?= e($university['name']) ?>"><?= e($university['name']) ?></th>
-                            <?php foreach ($products as $product): ?>
-                                <?php
-                                $phaseId = $phaseMap[(int) $university['id']][(int) $product['id']] ?? null;
-                                $phase = $phaseId !== null ? ($phaseById[$phaseId] ?? null) : null;
-                                ?>
-                                <?php if ($phase !== null && (int) $phase['num'] > 0): ?>
-                                    <td class="phase"
-                                        style="background-color: <?= e($phase['color']) ?>"
-                                        title="<?= e($university['name']) ?> · <?= e($product['name']) ?> → <?= e($phase['name']) ?>">
-                                        <?= (int) $phase['num'] ?>
-                                    </td>
-                                <?php else: ?>
-                                    <td class="empty">—</td>
+            <div class="workspace">
+                <!-- ===== Верхняя четверть: workflow текущего проекта ===== -->
+                <section class="panel panel--workflow">
+                    <div class="panel__head">
+                        <div>
+                            <h2 class="panel__title">Workflow текущего проекта</h2>
+                            <p class="panel__subtitle">
+                                Текущее взаимодействие: <strong><?= e($currentProject['title']) ?></strong>
+                                <?php if ($currentProject['phase'] !== null): ?>
+                                    · фаза <?= (int) $currentProject['phase']['num'] ?>
+                                    «<?= e($currentProject['phase']['name']) ?>»
                                 <?php endif; ?>
-                            <?php endforeach; ?>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                            </p>
+                        </div>
+                        <label class="project-select">
+                            Проект:
+                            <select onchange="if (this.value) location.href = 'index.php?project=' + this.value;">
+                                <?php foreach ($projectOptions as $opt): ?>
+                                    <option value="<?= (int) $opt['id'] ?>"
+                                        <?= $opt['id'] === $currentProject['id'] ? 'selected' : '' ?>>
+                                        <?= e($opt['title']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                    </div>
 
-            <section class="legend">
-                <h3 class="legend__title">Легенда фаз взаимодействия</h3>
-                <div class="legend__items">
-                    <?php foreach ($phases as $phase): ?>
-                        <span class="legend__item">
-                            <span class="legend__swatch" style="background-color: <?= e($phase['color']) ?>"></span>
-                            <?php if ((int) $phase['num'] > 0): ?><?= (int) $phase['num'] ?>.<?php endif; ?>
-                            <?= e($phase['name']) ?>
-                        </span>
-                    <?php endforeach; ?>
-                </div>
-            </section>
+                    <div class="workflow-scroll">
+                        <div class="workflow-track">
+                            <?php foreach ($workflow as $item): ?>
+                                <?php
+                                $stateClass = 'wstep--' . $item['state'];
+                                $sideClass = $item['side'] === 'both' ? ' wstep__side--both' : '';
+                                ?>
+                                <div class="wstep <?= $stateClass ?><?= $item['isCurrent'] ? ' current' : '' ?>"
+                                     title="<?= e($item['name']) ?> · <?= e($item['sideLabel']) ?> · <?= e($item['stateLabel']) ?>">
+                                    <span class="wstep__num"><?= (int) $item['num'] ?></span>
+                                    <span class="wstep__side<?= $sideClass ?>"><?= e($item['side']) ?></span>
+                                    <?php if ($item['isCurrent']): ?><span class="wstep__flag">◆</span><?php endif; ?>
+                                    <span class="wstep__name"><?= e($item['name']) ?></span>
+                                    <span class="wstep__status"><?= e($item['stateLabel']) ?></span>
+                                    <span class="wstep__bar"
+                                          style="background-color: <?= e($item['color']) ?>33">
+                                        <span class="wstep__bar-fill" style="width: <?= (int) $item['fill'] ?>%; background-color: <?= e($item['color']) ?>"></span>
+                                    </span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <div class="wf-legend">
+                            <?php foreach ($phases as $phase): ?>
+                                <span class="wf-legend__item">
+                                    <span class="wf-legend__swatch" style="background-color: <?= e($phase['color']) ?>"></span>
+                                    <?php if ((int) $phase['num'] > 0): ?><?= (int) $phase['num'] ?>.<?php endif; ?>
+                                    <?= e($phase['name']) ?>
+                                </span>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ===== Нижние 3/4: сетка проектов «вуз × продукт» ===== -->
+                <section class="panel panel--matrix">
+                    <div class="panel__head">
+                        <div>
+                            <h2 class="panel__title">Сетка проектов</h2>
+                            <p class="panel__subtitle">
+                                Строки — ВУЗы, столбцы — ИТ-продукты. Цвет клетки показывает текущую
+                                фазу взаимодействия; «—» означает, что взаимодействие не начато.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="matrix-scroll">
+                        <table class="matrix">
+                            <thead>
+                                <tr>
+                                    <th>Вуз \ Продукт</th>
+                                    <?php foreach ($products as $product): ?>
+                                        <th title="<?= e($product['name']) ?>"><?= e($product['name']) ?></th>
+                                    <?php endforeach; ?>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($universities as $university): ?>
+                                    <tr>
+                                        <th title="<?= e($university['name']) ?>"><?= e($university['name']) ?></th>
+                                        <?php foreach ($products as $product): ?>
+                                            <?php
+                                            $phaseId = $phaseMap[(int) $university['id']][(int) $product['id']] ?? null;
+                                            $phase = $phaseId !== null ? ($phaseById[$phaseId] ?? null) : null;
+                                            ?>
+                                            <?php if ($phase !== null && (int) $phase['num'] > 0): ?>
+                                                <td class="phase"
+                                                    style="background-color: <?= e($phase['color']) ?>"
+                                                    title="<?= e($university['name']) ?> · <?= e($product['name']) ?> → <?= e($phase['name']) ?>">
+                                                    <?= (int) $phase['num'] ?>
+                                                </td>
+                                            <?php else: ?>
+                                                <td class="empty">—</td>
+                                            <?php endif; ?>
+                                        <?php endforeach; ?>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <section class="legend">
+                        <h3 class="legend__title">Легенда фаз взаимодействия</h3>
+                        <div class="legend__items">
+                            <?php foreach ($phases as $phase): ?>
+                                <span class="legend__item">
+                                    <span class="legend__swatch" style="background-color: <?= e($phase['color']) ?>"></span>
+                                    <?php if ((int) $phase['num'] > 0): ?><?= (int) $phase['num'] ?>.<?php endif; ?>
+                                    <?= e($phase['name']) ?>
+                                </span>
+                            <?php endforeach; ?>
+                        </div>
+                    </section>
+                </section>
+            </div>
         </main>
     </div>
 <?php endif; ?>
