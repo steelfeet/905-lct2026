@@ -4,6 +4,11 @@ https://steelfeet.ru/submodules/905-lct2026/init_universities.php
 https://steelfeet.ru/submodules/905-lct2026/index.php
 
 
+Дизайн должен быть выдержан в следующем стиле и использовать рекомендуемый брендбук:
+1) https://design.rt.ru/gen2/designsystem/gettingStarted/intro - дизайн-система Ростелекома
+2) https://rtkb.zion-lms.ru/ - пример, по аналогии с которым делаем продукт
+3) https://design.rt.ru/gen2/react-storybook/?path=/docs/welcome-introduction--docs&globals=cssVariables:Rostelecom+Light+Theme - материалы, которые передаем разработчикам
+v.0.6.1.lct2026:7 [rt-design] [905-lct2026]
 
 
 
