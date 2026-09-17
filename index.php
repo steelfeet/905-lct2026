@@ -91,6 +91,91 @@ function e(string $value): string
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
 
+// ===== Транскрипции названий для сетки ======================================
+// Полные названия показываются в подсказке при наведении мыши.
+
+// Аббревиатуры вузов: id строки universities => [code, герб].
+// Герб вуза подгружается с Википедии (public), при отсутствии — буква-заглушка.
+$universityMarks = [
+    1  => ['code' => 'К(П)ФУ', 'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Seal_of_KFU.svg/60px-Seal_of_KFU.svg.png'],
+    2  => ['code' => 'МФТИ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/Mipt_logo.svg/60px-Mipt_logo.svg.png'],
+    3  => ['code' => 'МИФИ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e5/MEI_logo.svg/60px-MEI_logo.svg.png'],
+    4  => ['code' => 'СПбГУ',  'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Seal_of_Saint_Petersburg_State_University.svg/60px-Seal_of_Saint_Petersburg_State_University.svg.png'],
+    5  => ['code' => 'НГУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1c/Novosibirsk_State_University_logo.svg/60px-Novosibirsk_State_University_logo.svg.png'],
+    6  => ['code' => 'УрФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Ural_Federal_University_Logo.svg/60px-Ural_Federal_University_Logo.svg.png'],
+    7  => ['code' => 'ЮФУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Southern_Federal_University_logo.svg/60px-Southern_Federal_University_logo.svg.png'],
+    8  => ['code' => 'ДВФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Far_Eastern_Federal_University_Logo.svg/60px-Far_Eastern_Federal_University_Logo.svg.png'],
+    9  => ['code' => 'ТПУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/TPU_logo.svg/60px-TPU_logo.svg.png'],
+    10 => ['code' => 'КНИТУ-КАИ', 'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Kazan_National_Research_Technical_University_logo.svg/60px-Kazan_National_Research_Technical_University_logo.svg.png'],
+];
+
+// Транскрипция ИТ-продукта по его полному названию.
+$productShortNames = [
+    'Курсы по использованию ИИ в обучении'               => 'ИИ в обучении',
+    'Основы Data Science для преподавателей'             => 'Data Science',
+    'Кибергигиена и информационная безопасность'         => 'Инфобез',
+    'Облачные технологии: практика применения'           => 'Облака',
+    'Разработка на Python: базовый курс'                 => 'Python',
+    'Машинное обучение в задачах телекома'               => 'ML в телекоме',
+    'Цифровая трансформация образования'                 => 'Цифр. трансформация',
+    'Программирование для школьников'                    => 'Прогиб для школ',
+    'Аналитика данных: визуализация и отчётность'        => 'Аналитика данных',
+    'IoT: умные устройства и сети'                       => 'IoT',
+    'ИТ-программа «Большие данные и ИИ»'                 => 'БД и ИИ',
+    'ИТ-программа «Информационная безопасность»'         => 'Инфобез (прогр.)',
+    'ИТ-программа «Облачные вычисления и DevOps»'        => 'Cloud & DevOps',
+    'ИТ-программа «Сети связи и телеком-системы»'        => 'Сети и телеком',
+    'ИТ-программа «Цифровые платформы и лоу-код разработка»' => 'Цифр. платформы',
+];
+// Первая буква названия — для заглушки герба, если изображение недоступно.
+// mbstring может быть не включён в сборке PHP, поэтому первый символ UTF-8
+// читается вручную по старшему байту, а верхний регистр кириллицы — по таблице.
+function uni_initial(string $name): string
+{
+    $name = ltrim($name);
+    if ($name === '') {
+        return '?';
+    }
+
+    $byte = ord($name[0]);
+    if ($byte < 0x80) {
+        $len = 1;
+    } elseif ($byte < 0xF0) {
+        $len = $byte < 0xE0 ? 2 : 3;
+    } else {
+        $len = 4;
+    }
+
+    $first = substr($name, 0, $len);
+
+    // Верхний регистр: для кириллицы — побайтовая коррекция (cp1251-подобные
+    // пары UTF-8 отличаются последним байтом на 0x20; mbstring может отсутствовать),
+    // для латиницы — через strtoupper (однобайтовый символ).
+    if ($len > 1) {
+        $last = $len - 1;
+        $tail = ord($first[$last]);
+        if ($tail >= 0xB0 && $tail <= 0xDF) {
+            $first[$last] = chr($tail - 0x20);
+        }
+        return $first;
+    }
+
+    return strtoupper($first);
+}
+
+foreach ($universities as &$university) {
+    $mark = $universityMarks[(int) $university['id']] ?? null;
+    $university['short'] = $mark !== null ? $mark['code'] : $university['name'];
+    $university['crest'] = $mark !== null ? $mark['crest'] : null;
+    $university['initial'] = uni_initial($university['name']);
+}
+unset($university);
+
+foreach ($products as &$product) {
+    $product['short'] = $productShortNames[$product['name']] ?? $product['name'];
+}
+unset($product);
+
 // ===== Workflow текущего проекта ===========================================
 // 14 шагов базового workflow по ТЗ (раздел 5.1): номер, название, сторона.
 
@@ -113,16 +198,31 @@ $workflowSteps = [
 
 // Текущий проект (взаимодействие «вуз + продукт») — выбирается в шапке панели.
 $projectOptions = $pdo->query(
-    'SELECT i.id, i.phase_id, u.name AS university_name, p.name AS product_name
+    'SELECT i.id, i.phase_id, i.university_id, i.product_id,
+            u.name AS university_name, p.name AS product_name
      FROM interactions i
      JOIN universities u ON u.id = i.university_id
      JOIN it_products  p ON p.id = i.product_id
      ORDER BY i.id'
 )->fetchAll();
 
-// Готовое название для выпадающего списка выбора текущего проекта.
+// Краткие названия для subtitle панели workflow и списка проектов:
+// «К(П)ФУ · ИИ в обучении» вместо полных наименований.
+$shortByUniversityId = [];
+foreach ($universities as $university) {
+    $shortByUniversityId[(int) $university['id']] = $university['short'];
+}
+$shortByProductId = [];
+foreach ($products as $product) {
+    $shortByProductId[(int) $product['id']] = $product['short'];
+}
+
+// Полное и краткое название каждого проекта (взаимодействия «вуз + продукт»).
 foreach ($projectOptions as &$opt) {
     $opt['title'] = $opt['university_name'] . ' · ' . $opt['product_name'];
+    $opt['short'] =
+        ($shortByUniversityId[(int) $opt['university_id']] ?? $opt['university_name'])
+        . ' · ' . ($shortByProductId[(int) $opt['product_id']] ?? $opt['product_name']);
 }
 unset($opt);
 
@@ -137,12 +237,15 @@ if ($currentProjectId === 0 && $projectOptions !== []) {
     $currentProjectId = (int) $projectOptions[0]['id'];
 }
 
-$currentProject = ['id' => $currentProjectId, 'title' => 'нет активных проектов', 'phase' => null];
+$currentProject = ['id' => $currentProjectId, 'title' => 'нет активных проектов', 'short' => '—', 'phase' => null];
 $currentPhaseNum = 0;
 
 foreach ($projectOptions as $opt) {
     if ((int) $opt['id'] === $currentProjectId) {
         $currentProject['title'] = $opt['university_name'] . ' · ' . $opt['product_name'];
+        $currentProject['short'] =
+            ($shortByUniversityId[(int) $opt['university_id']] ?? $opt['university_name'])
+            . ' · ' . ($shortByProductId[(int) $opt['product_id']] ?? $opt['product_name']);
         $currentProject['phase'] = $opt['phase_id'] !== null ? ($phaseById[(int) $opt['phase_id']] ?? null) : null;
         if ($currentProject['phase'] !== null) {
             $currentPhaseNum = (int) $currentProject['phase']['num'];
@@ -327,16 +430,14 @@ foreach ($workflowSteps as $step) {
             margin-bottom: var(--space-md);
         }
 
-        /* ===== Панель управления ===== */
+        /* ===== Панель управления: шапка + горизонтальное меню ===== */
         .dashboard {
-            display: grid;
-            grid-template-columns: 260px 1fr;
-            grid-template-rows: auto 1fr;
+            display: flex;
+            flex-direction: column;
             min-height: 100vh;
         }
 
         .topbar {
-            grid-column: 1 / -1;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -392,40 +493,42 @@ foreach ($workflowSteps as $step) {
             background-color: rgba(139, 105, 20, 0.05);
         }
 
-        .sidebar {
+        /* Горизонтальное меню разделов — под шапкой проекта */
+        .mainnav {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+            padding: 0 var(--space-lg);
             background-color: var(--color-light);
-            border-right: 1px solid rgba(26, 26, 26, 0.1);
-            padding: var(--space-lg) var(--space-md);
+            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
         }
 
-        .sidebar__caption {
+        .mainnav__caption {
             font-size: 0.7rem;
             text-transform: uppercase;
             letter-spacing: 0.1em;
             color: var(--color-tertiary);
-            margin-bottom: var(--space-sm);
+            margin-right: var(--space-sm);
         }
 
-        .sidebar ul { list-style: none; }
-
-        .sidebar a {
+        .mainnav a {
             display: block;
             padding: 0.65rem var(--space-sm);
             font-size: 0.9rem;
-            border-left: 2px solid transparent;
-            margin-bottom: 2px;
+            border-bottom: 2px solid transparent;
         }
 
-        .sidebar a:hover,
-        .sidebar a.active {
+        .mainnav a:hover,
+        .mainnav a.active {
             background-color: rgba(139, 105, 20, 0.1);
-            border-left-color: var(--color-accent);
+            border-bottom-color: var(--color-accent);
             color: var(--color-primary);
         }
 
         .content {
+            flex: 1;
+            min-height: 0;
             padding: var(--space-lg);
-            overflow-x: auto;
         }
 
         .content__header { margin-bottom: var(--space-lg); }
@@ -498,14 +601,13 @@ foreach ($workflowSteps as $step) {
             display: flex;
             align-items: stretch;
             gap: 4px;
-            overflow-x: auto;
             padding: 4px 2px 8px;
         }
 
         .wstep {
             position: relative;
-            flex: 1 0 96px;
-            max-width: 130px;
+            flex: 1 1 0;
+            min-width: 0;
             min-height: 108px;
             border: 1px solid rgba(26, 26, 26, 0.12);
             border-top: 4px solid rgba(26, 26, 26, 0.2);
@@ -552,10 +654,13 @@ foreach ($workflowSteps as $step) {
         .wstep__side--both { border-color: var(--color-accent); color: var(--color-accent-dark); }
 
         .wstep__name {
-            font-size: 0.7rem;
-            line-height: 1.25;
+            font-size: 0.66rem;
+            line-height: 1.2;
             color: var(--color-secondary);
             overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
         }
 
         .wstep__status {
@@ -600,6 +705,12 @@ foreach ($workflowSteps as $step) {
 
         .wstep--pending { border-top-color: rgba(26, 26, 26, 0.2); opacity: 0.85; }
 
+        /* Узкие экраны: workflow с горизонтальной прокруткой дорожки */
+        @media (max-width: 1100px) {
+            .workflow-track { overflow-x: auto; }
+            .wstep { flex: 0 0 96px; }
+        }
+
         /* Легенда состояний workflow */
         .wf-legend {
             display: flex;
@@ -641,7 +752,12 @@ foreach ($workflowSteps as $step) {
             border: 1px solid rgba(26, 26, 26, 0.1);
         }
 
+        /* Минимальная ширина сетки: при узком экране включается прокрутка
+           контейнера, а не сжатие клеток; на обычном экране полос нет */
         table.matrix {
+            width: 100%;
+            min-width: 880px;
+            table-layout: fixed;
             border-collapse: separate;
             border-spacing: 0;
             font-size: 0.8rem;
@@ -652,9 +768,11 @@ foreach ($workflowSteps as $step) {
         table.matrix td {
             border-right: 1px solid rgba(26, 26, 26, 0.1);
             border-bottom: 1px solid rgba(26, 26, 26, 0.1);
-            padding: 0.5rem 0.65rem;
+            padding: 0.4rem 0.3rem;
             text-align: center;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         table.matrix thead th {
@@ -673,7 +791,42 @@ foreach ($workflowSteps as $step) {
             position: sticky;
             left: 0;
             z-index: 1;
-            max-width: 280px;
+        }
+
+        /* Колонка вузов: герб + транскрипция */
+        table.matrix .uni {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            min-width: 0;
+        }
+
+        table.matrix .uni__crest {
+            width: 20px;
+            height: 20px;
+            object-fit: contain;
+            flex-shrink: 0;
+            background-color: var(--color-white);
+            border: 1px solid rgba(26, 26, 26, 0.12);
+            border-radius: 50%;
+            padding: 1px;
+        }
+
+        table.matrix .uni__initial {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: var(--color-white);
+            background-color: var(--color-accent);
+            border-radius: 50%;
+        }
+
+        table.matrix .uni__code {
             overflow: hidden;
             text-overflow: ellipsis;
         }
@@ -733,8 +886,7 @@ foreach ($workflowSteps as $step) {
         }
 
         @media (max-width: 900px) {
-            .dashboard { grid-template-columns: 1fr; }
-            .sidebar { border-right: none; border-bottom: 1px solid rgba(26, 26, 26, 0.1); }
+            .mainnav { overflow-x: auto; }
         }
     </style>
 </head>
@@ -780,15 +932,13 @@ foreach ($workflowSteps as $step) {
             </div>
         </header>
 
-        <nav class="sidebar">
-            <p class="sidebar__caption">Разделы</p>
-            <ul>
-                <li><a class="active" href="index.php">Главная</a></li>
-                <li><a href="#">Взаимодействия</a></li>
-                <li><a href="#">Workflow</a></li>
-                <li><a href="#">Отчёты</a></li>
-                <li><a href="#">Аудит</a></li>
-            </ul>
+        <nav class="mainnav">
+            <span class="mainnav__caption">Разделы</span>
+            <a class="active" href="index.php">Главная</a>
+            <a href="#">Взаимодействия</a>
+            <a href="#">Workflow</a>
+            <a href="#">Отчёты</a>
+            <a href="#">Аудит</a>
         </nav>
 
         <main class="content">
@@ -799,7 +949,8 @@ foreach ($workflowSteps as $step) {
                         <div>
                             <h2 class="panel__title">Workflow текущего проекта</h2>
                             <p class="panel__subtitle">
-                                Текущее взаимодействие: <strong><?= e($currentProject['title']) ?></strong>
+                                Текущее взаимодействие:
+                                <strong title="<?= e($currentProject['title']) ?>"><?= e($currentProject['short']) ?></strong>
                                 <?php if ($currentProject['phase'] !== null): ?>
                                     · фаза <?= (int) $currentProject['phase']['num'] ?>
                                     «<?= e($currentProject['phase']['name']) ?>»
@@ -809,12 +960,13 @@ foreach ($workflowSteps as $step) {
                         <label class="project-select">
                             Проект:
                             <select onchange="if (this.value) location.href = 'index.php?project=' + this.value;">
-                                <?php foreach ($projectOptions as $opt): ?>
-                                    <option value="<?= (int) $opt['id'] ?>"
-                                        <?= $opt['id'] === $currentProject['id'] ? 'selected' : '' ?>>
-                                        <?= e($opt['title']) ?>
-                                    </option>
-                                <?php endforeach; ?>
+                                    <?php foreach ($projectOptions as $opt): ?>
+                                        <option value="<?= (int) $opt['id'] ?>"
+                                            <?= $opt['id'] === $currentProject['id'] ? 'selected' : '' ?>
+                                            title="<?= e($opt['title']) ?>">
+                                            <?= e($opt['short']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
                             </select>
                         </label>
                     </div>
@@ -871,14 +1023,25 @@ foreach ($workflowSteps as $step) {
                                 <tr>
                                     <th>Вуз \ Продукт</th>
                                     <?php foreach ($products as $product): ?>
-                                        <th title="<?= e($product['name']) ?>"><?= e($product['name']) ?></th>
+                                        <th title="<?= e($product['name']) ?>"><?= e($product['short']) ?></th>
                                     <?php endforeach; ?>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($universities as $university): ?>
                                     <tr>
-                                        <th title="<?= e($university['name']) ?>"><?= e($university['name']) ?></th>
+                                        <th title="<?= e($university['name']) ?>">
+                                            <span class="uni">
+                                                <?php if ($university['crest'] !== null): ?>
+                                                    <img class="uni__crest" src="<?= e($university['crest']) ?>"
+                                                         alt="Герб: <?= e($university['short']) ?>"
+                                                         onerror="this.outerHTML='&lt;span class=&quot;uni__initial&quot;&gt;<?= e($university['initial']) ?>&lt;/span&gt;'">
+                                                <?php else: ?>
+                                                    <span class="uni__initial"><?= e($university['initial']) ?></span>
+                                                <?php endif; ?>
+                                                <span class="uni__code"><?= e($university['short']) ?></span>
+                                            </span>
+                                        </th>
                                         <?php foreach ($products as $product): ?>
                                             <?php
                                             $phaseId = $phaseMap[(int) $university['id']][(int) $product['id']] ?? null;
