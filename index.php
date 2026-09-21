@@ -2,19 +2,13 @@
 /**
  * Точка входа CRM «ИТ Школа РТК» (прототип).
  *
- * Экран менеджера:
- *   - рабочий процесс текущего проекта (верх);
- *   - сетка проектов «вуз × продукт»: клетки с взаимодействием — цветные
- *     листочки, окрашенные в цвет фазы.
+ * Роли:
+ *   - manager: рабочий процесс + сетка проектов с drag-and-drop листочков;
+ *   - university: рабочие процессы вуза + баннер подтверждения перехода;
+ *   - supervisor: интерактивный дашборд — KPI, живые графики (Chart.js),
+ *     стилизованная SVG-карта России без внешних API-ключей, cross-filtering.
  *
- * Перетаскивание листка (псевдо-3D):
- *   - при drag матрица встаёт в perspective, листок приподнимается над сеткой;
- *   - рядом с исходной клеткой появляются два «кармана» — «Предыдущая фаза»
- *     и «Следующая фаза»; их можно навести и отпустить на них листок;
- *   - фаза с 🔒 уходит на подтверждение вуза; остальные применяются сразу.
- *
- * Экран представителя вуза: список рабочих процессов вуза + баннер
- * подтверждения перехода на фазу с 🔒.
+ * Фильтры периода и типа графика влияют на ВСЕ графики и карту.
  */
 
 session_start();
@@ -29,16 +23,11 @@ $pdo = db();
 
 $action = $_GET['action'] ?? '';
 
-/**
- * Правило прототипа: фазы с чётным номером (> 0) требуют подтверждения
- * второй стороны.
- */
 function phase_requires_confirmation(int $num): bool
 {
     return $num > 0 && $num % 2 === 0;
 }
 
-// --- Перемещение листка на соседнюю фазу (AJAX, JSON) -----------------------
 if ($action === 'move_phase' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
 
@@ -110,7 +99,6 @@ if ($action === 'move_phase' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-// --- Подтверждение/отклонение перехода представителем вуза ------------------
 if (($action === 'confirm_phase' || $action === 'reject_phase') && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($_SESSION['pending_phase_change'])) {
         $pending = $_SESSION['pending_phase_change'];
@@ -196,7 +184,6 @@ foreach ($phases as &$p) {
 }
 unset($p);
 
-// Метаданные фаз для JS — без HTML, без лишнего.
 $phaseMeta = [];
 foreach ($phases as $p) {
     $phaseMeta[] = [
@@ -449,10 +436,200 @@ $workflow = build_project_workflow(
     $currentProjectId
 );
 
+// =============================================================================
+// Данные для дашборда руководителя
+// =============================================================================
+
+$dashPhaseCounts = [];
+foreach ($phases as $p) {
+    $dashPhaseCounts[(int) $p['id']] = 0;
+}
+$dashUniCounts = [];
+foreach ($universities as $u) {
+    $dashUniCounts[(int) $u['id']] = 0;
+}
+$dashUniMaxPhaseNum = [];
+$dashUniPhaseCount = [];
+$totalInteractions = 0;
+$activeInteractions = 0;
+$sumPhase = 0;
+
+foreach ($interactions as $row) {
+    $totalInteractions++;
+    $pid = $row['phase_id'] !== null ? (int) $row['phase_id'] : 0;
+    $uid = (int) $row['university_id'];
+
+    if ($pid > 0 && isset($dashPhaseCounts[$pid])) {
+        $dashPhaseCounts[$pid]++;
+    }
+    if (isset($dashUniCounts[$uid])) {
+        $dashUniCounts[$uid]++;
+    }
+
+    $num = ($pid > 0 && isset($phaseById[$pid])) ? (int) $phaseById[$pid]['num'] : 0;
+    $sumPhase += $num;
+    if ($num > 0 && $num < 14) {
+        $activeInteractions++;
+    }
+
+    if (!isset($dashUniMaxPhaseNum[$uid]) || $num > $dashUniMaxPhaseNum[$uid]) {
+        $dashUniMaxPhaseNum[$uid] = $num;
+    }
+
+    if ($pid > 0) {
+        if (!isset($dashUniPhaseCount[$uid])) {
+            $dashUniPhaseCount[$uid] = [];
+        }
+        $dashUniPhaseCount[$uid][$pid] = ($dashUniPhaseCount[$uid][$pid] ?? 0) + 1;
+    }
+}
+
+$avgPhase = $totalInteractions > 0 ? round($sumPhase / $totalInteractions, 1) : 0;
+
+$chartPhases = array_values(array_filter($phases, function ($p) { return (int) $p['num'] > 0; }));
+
+$topUniversities = [];
+foreach ($universities as $u) {
+    $uid = (int) $u['id'];
+    $topUniversities[] = [
+        'id'    => $uid,
+        'short' => $u['short'],
+        'full'  => $u['name'],
+        'count' => $dashUniCounts[$uid] ?? 0,
+    ];
+}
+usort($topUniversities, function ($a, $b) { return $b['count'] - $a['count']; });
+$topUniversities = array_slice($topUniversities, 0, 8);
+
+// ===== Помесячные mock-данные с разбивкой «вуз × фаза» =====================
+$monthsRu = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+$nowMonth = (int) date('n');
+
+$chartNewProjectsByMonth = [];
+$monthly = [];
+
+for ($i = 11; $i >= 0; $i--) {
+    $m = $nowMonth - $i;
+    while ($m <= 0) { $m += 12; }
+    $seed = ($i + 3) * 41;
+
+    $byUniPhase = [];
+    foreach ($universities as $u) {
+        $uid = (int) $u['id'];
+        $byUniPhase[(string) $uid] = [];
+        foreach ($chartPhases as $p) {
+            $pid = (int) $p['id'];
+            $base = ($seed * 7 + $uid * 11 + $pid * 13) % 4;
+            $recency = (12 - $i);
+            $val = $base + (int) ($recency / 4);
+            if ($val > 0) {
+                $byUniPhase[(string) $uid][(string) $pid] = $val;
+            }
+        }
+    }
+
+    $chartNewProjectsByMonth[] = 1 + ($seed % 4);
+
+    $monthly[] = [
+        'label'      => $monthsRu[$m - 1],
+        'byUniPhase' => $byUniPhase,
+    ];
+}
+
+// ===== Карта: проекция lat/lng → SVG =======================================
+$mapViewWidth  = 1000;
+$mapViewHeight = 500;
+$lngMin = 19.0;  $lngMax = 180.0;
+$latMin = 41.0;  $latMax = 82.0;
+
+function project_point(float $lat, float $lng, int $w, int $h, float $lngMin, float $lngMax, float $latMin, float $latMax): array {
+    $x = ($lng - $lngMin) / ($lngMax - $lngMin) * $w;
+    $y = ($latMax - $lat) / ($latMax - $latMin) * $h;
+    return [round($x, 1), round($y, 1)];
+}
+
+$universityCoords = [
+    1  => [55.7906, 49.1221],
+    2  => [55.9297, 37.5213],
+    3  => [55.6497, 37.6642],
+    4  => [59.8822, 29.8258],
+    5  => [54.8473, 83.0930],
+    6  => [56.8439, 60.6526],
+    7  => [47.2225, 39.7188],
+    8  => [43.1155, 131.8855],
+    9  => [56.4653, 84.9508],
+    10 => [55.8337, 49.1254],
+];
+
+$mapPoints = [];
+foreach ($universities as $u) {
+    $uid = (int) $u['id'];
+    if (!isset($universityCoords[$uid])) continue;
+
+    $maxNum   = $dashUniMaxPhaseNum[$uid] ?? 0;
+    $maxPhase = $maxNum > 0 ? ($phaseByNum[$maxNum] ?? null) : null;
+    $color    = $maxPhase !== null ? $maxPhase['color'] : '#9ca3af';
+
+    [$sx, $sy] = project_point(
+        $universityCoords[$uid][0],
+        $universityCoords[$uid][1],
+        $mapViewWidth, $mapViewHeight,
+        $lngMin, $lngMax, $latMin, $latMax
+    );
+
+    $mapPoints[] = [
+        'id'       => $uid,
+        'name'     => $u['name'],
+        'short'    => $u['short'],
+        'x'        => $sx,
+        'y'        => $sy,
+        'color'    => $color,
+        'phase'    => $maxPhase !== null ? $maxPhase['name'] : 'Не начато',
+        'projects' => $dashUniCounts[$uid] ?? 0,
+    ];
+}
+
+// ===== Payload для JS-дашборда =============================================
+$dashPayload = [
+    'phases' => array_map(function ($p) {
+        return [
+            'id'    => (int) $p['id'],
+            'num'   => (int) $p['num'],
+            'name'  => $p['name'],
+            'color' => $p['color'],
+        ];
+    }, $chartPhases),
+    'universities' => array_map(function ($u) {
+        return [
+            'id'    => $u['id'],
+            'short' => $u['short'],
+            'name'  => $u['full'],
+        ];
+    }, $topUniversities),
+    'allUniversities' => array_map(function ($u) {
+        return [
+            'id'    => (int) $u['id'],
+            'short' => $u['short'],
+            'name'  => $u['name'],
+        ];
+    }, $universities),
+    'mapPoints'   => $mapPoints,
+    'monthly'     => $monthly,
+    'newProjects' => $chartNewProjectsByMonth,
+    'kpi' => [
+        'total'    => $totalInteractions,
+        'active'   => $activeInteractions,
+        'unis'     => count($universities),
+        'products' => count($products),
+        'avgPhase' => $avgPhase,
+        'maxPhase' => count($phases) - 1,
+    ],
+];
+
 // ===== Переключатель ролей ==================================================
 
 $viewRole = $_GET['role'] ?? 'manager';
-if (!in_array($viewRole, ['manager', 'university'], true)) {
+if (!in_array($viewRole, ['manager', 'university', 'supervisor'], true)) {
     $viewRole = 'manager';
 }
 
@@ -694,7 +871,6 @@ $managerLabel = $currentUser !== null
 
         .content { flex: 1; min-height: 0; padding: var(--space-lg); }
 
-        /* ===== Уведомления ===== */
         .notification {
             display: flex;
             align-items: center;
@@ -732,14 +908,15 @@ $managerLabel = $currentUser !== null
         .notification__btn--danger { color: #dc2626; }
         .notification__btn--danger:hover { background-color: rgba(220, 38, 38, 0.08); }
 
-        /* ===== Workspace ===== */
         .workspace { display: flex; flex-direction: column; gap: var(--space-md); min-height: calc(100vh - 46px); }
         .workspace--uni { min-height: calc(100vh - 46px - 62px); }
         .workspace--uni .panel--workflow { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+        .workspace--dash { min-height: calc(100vh - 46px - 62px); }
 
         .panel { background-color: var(--color-white); border: 1px solid rgba(26, 26, 26, 0.1); padding: var(--space-md); }
         .panel--workflow { flex: 0 0 auto; min-height: 230px; display: flex; flex-direction: column; }
         .panel--matrix { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+        .panel--dashboard { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
         .panel__head {
             display: flex;
@@ -911,10 +1088,8 @@ $managerLabel = $currentUser !== null
             border: 1px dashed rgba(26, 26, 26, 0.15);
         }
 
-        /* ===== Матрица «вуз × продукт» ===== */
         .matrix-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid rgba(26, 26, 26, 0.1); }
 
-        /* Псевдо-3D сцена: перспектива включается на время драга */
         body.is-dragging .matrix-scroll { perspective: 1200px; }
 
         table.matrix {
@@ -929,9 +1104,7 @@ $managerLabel = $currentUser !== null
             transform-origin: 50% 50%;
         }
 
-        body.is-dragging table.matrix {
-            transform: rotateX(7deg);
-        }
+        body.is-dragging table.matrix { transform: rotateX(7deg); }
 
         table.matrix th, table.matrix td {
             border-right: 1px solid rgba(26, 26, 26, 0.1);
@@ -1007,7 +1180,6 @@ $managerLabel = $currentUser !== null
             padding: 0.4rem 0.3rem;
         }
 
-        /* ===== Цветной листочек фазы ===== */
         table.matrix td.phase { padding: 3px; }
 
         table.matrix td.phase .sticker-cell {
@@ -1082,7 +1254,6 @@ $managerLabel = $currentUser !== null
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
         }
 
-        /* Pending: проект ожидает подтверждения — листочек пульсирует */
         table.matrix td.is-pending .sticker-cell {
             animation: pulse-pending 1.8s ease-in-out infinite;
             outline: 2px dashed #b45309;
@@ -1094,7 +1265,6 @@ $managerLabel = $currentUser !== null
             50%      { box-shadow: 0 1px 2px rgba(0,0,0,0.15), 0 0 0 10px rgba(180, 83, 9, 0); }
         }
 
-        /* ===== Псевдо-3D при перетаскивании ===== */
         body.is-dragging table.matrix td.phase .sticker-cell {
             opacity: 0.35;
             filter: grayscale(0.4);
@@ -1115,7 +1285,6 @@ $managerLabel = $currentUser !== null
                 0 24px 48px rgba(0, 0, 0, 0.22);
         }
 
-        /* ===== Плавающие карманы фаз ===== */
         .phase-pocket {
             position: fixed;
             z-index: 10000;
@@ -1136,10 +1305,7 @@ $managerLabel = $currentUser !== null
             user-select: none;
         }
 
-        .phase-pocket.is-visible {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-        }
+        .phase-pocket.is-visible { opacity: 1; transform: translateY(0) scale(1); }
 
         .phase-pocket.is-hover {
             background: rgba(139, 105, 20, 0.1);
@@ -1161,12 +1327,7 @@ $managerLabel = $currentUser !== null
             gap: 5px;
         }
 
-        .phase-pocket__label-arrow {
-            font-size: 0.9rem;
-            font-weight: 700;
-            color: var(--color-accent-dark);
-            line-height: 1;
-        }
+        .phase-pocket__label-arrow { font-size: 0.9rem; font-weight: 700; color: var(--color-accent-dark); line-height: 1; }
 
         .phase-pocket__body {
             display: flex;
@@ -1192,16 +1353,8 @@ $managerLabel = $currentUser !== null
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
         }
 
-        .phase-pocket__name {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .phase-pocket__lock {
-            margin-left: auto;
-            font-size: 0.9rem;
-            flex-shrink: 0;
-        }
+        .phase-pocket__name { flex: 1; min-width: 0; }
+        .phase-pocket__lock { margin-left: auto; font-size: 0.9rem; flex-shrink: 0; }
 
         .phase-pocket__pin {
             position: absolute;
@@ -1230,7 +1383,6 @@ $managerLabel = $currentUser !== null
 
         body.role-university table.matrix td.clickable { cursor: default; }
 
-        /* ===== Легенда фаз ===== */
         .legend {
             margin-top: var(--space-md);
             padding: var(--space-sm) var(--space-md);
@@ -1239,38 +1391,363 @@ $managerLabel = $currentUser !== null
             flex-shrink: 0;
         }
 
-        .legend__title {
-            font-family: var(--font-serif);
-            font-size: 1.1rem;
-            margin-bottom: var(--space-sm);
+        .legend__title { font-family: var(--font-serif); font-size: 1.1rem; margin-bottom: var(--space-sm); }
+        .legend__items { display: flex; flex-wrap: wrap; gap: 0.5rem var(--space-md); }
+        .legend__item { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--color-secondary); }
+        .legend__swatch { width: 16px; height: 16px; border: 1px solid rgba(26, 26, 26, 0.2); flex-shrink: 0; border-radius: 2px; }
+
+        /* ===== Дашборд руководителя ===== */
+        .kpi-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: var(--space-sm);
+            margin-bottom: var(--space-md);
         }
 
-        .legend__items {
+        .kpi-card {
+            position: relative;
+            padding: 16px 18px;
+            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
+            border: 1px solid rgba(139, 105, 20, 0.15);
+            border-left: 3px solid var(--color-accent);
+            overflow: hidden;
+            transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(139, 105, 20, 0.12);
+        }
+
+        .kpi-card::after {
+            content: '';
+            position: absolute;
+            right: -30px;
+            bottom: -30px;
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(139, 105, 20, 0.08) 0%, transparent 70%);
+        }
+
+        .kpi-card__label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-tertiary);
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .kpi-card__value {
+            font-family: var(--font-serif);
+            font-size: 2.2rem;
+            font-weight: 600;
+            color: var(--color-primary);
+            line-height: 1;
+            margin-bottom: 6px;
+            position: relative;
+            z-index: 1;
+            transition: color 0.2s;
+        }
+
+        .kpi-card__hint {
+            font-size: 0.72rem;
+            color: var(--color-accent-dark);
+            position: relative;
+            z-index: 1;
+        }
+
+        .dash-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            padding: 10px 0;
+            margin-bottom: var(--space-md);
+            border-bottom: 1px solid rgba(26, 26, 26, 0.08);
+        }
+
+        .dash-toolbar__group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .dash-toolbar__label {
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-tertiary);
+            margin-right: 4px;
+        }
+
+        .dash-toolbar__btn {
+            padding: 5px 11px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid rgba(26, 26, 26, 0.15);
+            background: #fff;
+            color: var(--color-secondary);
+            cursor: pointer;
+            font-family: var(--font-sans);
+            transition: 0.15s ease-out;
+        }
+
+        .dash-toolbar__btn:hover { background: rgba(139, 105, 20, 0.08); color: var(--color-primary); }
+
+        .dash-toolbar__btn.is-active {
+            background: var(--color-accent);
+            color: #fff;
+            border-color: var(--color-accent);
+        }
+
+        .filter-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: rgba(139, 105, 20, 0.14);
+            color: var(--color-accent-dark);
+            border-radius: 14px;
+            font-size: 0.72rem;
+            font-weight: 500;
+            cursor: pointer;
+            margin-left: auto;
+            transition: 0.15s;
+            animation: chip-in 0.25s ease-out;
+        }
+
+        .filter-chip:hover { background: rgba(139, 105, 20, 0.24); }
+        .filter-chip__x { font-size: 0.95rem; line-height: 1; opacity: 0.7; }
+        .filter-chip:hover .filter-chip__x { opacity: 1; }
+
+        @keyframes chip-in {
+            from { opacity: 0; transform: translateX(8px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+
+        .dash-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-auto-rows: minmax(260px, auto);
+            gap: var(--space-md);
+            flex: 1;
+        }
+
+        .dash-card {
+            padding: var(--space-md);
+            border: 1px solid rgba(26, 26, 26, 0.1);
+            background: var(--color-white);
+            display: flex;
+            flex-direction: column;
+            min-height: 260px;
+            min-width: 0;
+            transition: box-shadow 0.2s ease-out, border-color 0.2s ease-out;
+        }
+
+        .dash-card:hover { border-color: rgba(139, 105, 20, 0.25); }
+
+        .dash-card--wide { grid-column: span 2; }
+
+        .dash-card__title {
+            font-family: var(--font-serif);
+            font-size: 1.15rem;
+            margin-bottom: var(--space-sm);
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .dash-card__hint { font-family: var(--font-sans); font-size: 0.72rem; color: var(--color-tertiary); font-weight: 400; }
+
+        .dash-card__body {
+            flex: 1;
+            min-height: 200px;
+            position: relative;
+        }
+
+        .dash-card canvas { width: 100% !important; height: 100% !important; cursor: pointer; display: block; }
+
+        .dash-card--map { grid-column: span 3; min-height: 500px; }
+
+        /* ===== SVG-карта ===== */
+        .russia-map-wrap {
+            position: relative;
+            flex: 1;
+            min-height: 420px;
+            background: linear-gradient(180deg, #fbfaf6 0%, #eee9dc 100%);
+            border: 1px solid rgba(26, 26, 26, 0.08);
+            overflow: hidden;
+        }
+
+        .russia-map {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .russia-map .map-grid {
+            stroke: rgba(26, 26, 26, 0.06);
+            stroke-width: 0.6;
+            stroke-dasharray: 2 3;
+        }
+
+        .russia-map .map-grid-label {
+            font-family: var(--font-sans);
+            font-size: 8px;
+            fill: rgba(26, 26, 26, 0.25);
+            letter-spacing: 0.05em;
+        }
+
+        .russia-outline {
+            fill: url(#map-fill);
+            stroke: rgba(139, 105, 20, 0.45);
+            stroke-width: 1.8;
+            stroke-linejoin: round;
+            stroke-linecap: round;
+            filter: url(#map-glow);
+            transition: fill 0.3s ease-out;
+        }
+
+        .uni-point { cursor: pointer; transition: opacity 0.25s ease-out; }
+        .uni-point.is-dimmed { opacity: 0.15; }
+
+        .uni-point__dot {
+            transition: r 0.25s ease-out, filter 0.25s ease-out, fill 0.3s ease-out;
+            transform-origin: center;
+        }
+
+        .uni-point__halo {
+            transition: opacity 0.3s ease-out, r 0.3s ease-out, fill 0.3s ease-out;
+        }
+
+        .uni-point__pulse {
+            fill: none;
+            stroke-width: 2;
+            opacity: 0;
+            transition: opacity 0.2s, stroke 0.3s ease-out;
+            pointer-events: none;
+        }
+
+        .uni-point__label {
+            font-family: var(--font-sans);
+            font-size: 11px;
+            font-weight: 600;
+            fill: var(--color-secondary);
+            paint-order: stroke;
+            stroke: #fff;
+            stroke-width: 3px;
+            stroke-linejoin: round;
+            pointer-events: none;
+            transition: opacity 0.25s ease-out;
+        }
+
+        .uni-point.is-dimmed .uni-point__label { opacity: 0.2; }
+
+        .uni-point:hover .uni-point__dot { r: 15; filter: brightness(1.1); }
+        .uni-point:hover .uni-point__halo { opacity: 0.28; r: 26; }
+        .uni-point.is-selected .uni-point__dot { r: 16; stroke-width: 3; }
+        .uni-point.is-selected .uni-point__halo { opacity: 0.35; r: 30; }
+        .uni-point.is-selected .uni-point__pulse {
+            opacity: 0.55;
+            animation: pulse-marker 2s ease-out infinite;
+        }
+
+        @keyframes pulse-marker {
+            0%   { r: 16; opacity: 0.55; }
+            100% { r: 34; opacity: 0; }
+        }
+
+        .map-info {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            min-width: 200px;
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.97);
+            border-left: 3px solid var(--color-accent);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+            font-family: var(--font-sans);
+            font-size: 0.8rem;
+            color: var(--color-primary);
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .map-info.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .map-info__phase {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--color-accent-dark);
+            margin-bottom: 3px;
+        }
+
+        .map-info__name {
+            font-family: var(--font-serif);
+            font-size: 1.05rem;
+            font-weight: 500;
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+
+        .map-info__projects {
+            font-size: 0.72rem;
+            color: var(--color-tertiary);
+        }
+
+        .map-legend {
             display: flex;
             flex-wrap: wrap;
             gap: 0.5rem var(--space-md);
+            margin-top: var(--space-sm);
+            padding-top: var(--space-sm);
+            border-top: 1px solid rgba(26, 26, 26, 0.08);
         }
 
-        .legend__item {
+        .map-legend__item {
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
-            font-size: 0.8rem;
+            gap: 0.4rem;
+            font-size: 0.75rem;
             color: var(--color-secondary);
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 10px;
+            transition: 0.15s;
         }
 
-        .legend__swatch {
-            width: 16px;
-            height: 16px;
-            border: 1px solid rgba(26, 26, 26, 0.2);
-            flex-shrink: 0;
-            border-radius: 2px;
+        .map-legend__item:hover { background: rgba(139, 105, 20, 0.1); }
+        .map-legend__item.is-active { background: rgba(139, 105, 20, 0.2); font-weight: 600; }
+
+        .map-legend__dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.15); }
+
+        @media (max-width: 1100px) {
+            .dash-grid { grid-template-columns: 1fr 1fr; }
+            .dash-card--wide { grid-column: span 2; }
+            .dash-card--map { grid-column: span 2; }
+        }
+
+        @media (max-width: 720px) {
+            .dash-grid { grid-template-columns: 1fr; }
+            .dash-card--wide, .dash-card--map { grid-column: span 1; }
         }
 
         @media (max-width: 900px) { .mainnav { overflow-x: auto; } }
     </style>
 </head>
-<body class="<?= $currentUser === null ? 'auth-body' : ($viewRole === 'university' ? 'role-university' : 'role-manager') ?>">
+<body class="<?= $currentUser === null ? 'auth-body' : ('role-' . $viewRole) ?>">
 <?php if ($currentUser === null): ?>
     <div class="auth-card">
         <h1 class="auth-card__brand">Кладезь</h1>
@@ -1320,6 +1797,13 @@ $managerLabel = $currentUser !== null
                        href="?role=university<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
                         <span class="role-switch__dot"></span>
                         Представитель Вуза
+                    </a>
+                    <a class="role-switch__btn <?= $viewRole === 'supervisor' ? 'active' : '' ?>"
+                       role="tab"
+                       aria-selected="<?= $viewRole === 'supervisor' ? 'true' : 'false' ?>"
+                       href="?role=supervisor">
+                        <span class="role-switch__dot"></span>
+                        Руководитель · Дашборд
                     </a>
                 </div>
                 <a class="topbar__logout" href="index.php?logout=1">Выйти</a>
@@ -1518,7 +2002,7 @@ $managerLabel = $currentUser !== null
                         </section>
                     </section>
                 </div>
-            <?php else: ?>
+            <?php elseif ($viewRole === 'university'): ?>
                 <div class="workspace workspace--uni">
 
                     <?php if ($universityNotification !== null): ?>
@@ -1627,6 +2111,262 @@ $managerLabel = $currentUser !== null
                         </div>
                     </section>
                 </div>
+            <?php else: ?>
+                <!-- ============ ВИД РУКОВОДИТЕЛЯ: ИНТЕРАКТИВНЫЙ ДАШБОРД ============ -->
+                <div class="workspace workspace--dash">
+                    <section class="panel panel--dashboard">
+                        <div class="panel__head">
+                            <div>
+                                <h2 class="panel__title">Дашборд руководителя</h2>
+                                <p class="panel__subtitle">
+                                    Фильтры периода и типа влияют на все графики и карту.
+                                    Клик по фазе, вузу или маркеру — cross-filtering.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="kpi-row">
+                            <div class="kpi-card">
+                                <div class="kpi-card__label">Всего проектов</div>
+                                <div class="kpi-card__value"><?= (int) $totalInteractions ?></div>
+                                <div class="kpi-card__hint">взаимодействий «вуз × продукт»</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-card__label">Активных</div>
+                                <div class="kpi-card__value"><?= (int) $activeInteractions ?></div>
+                                <div class="kpi-card__hint">в работе, не завершено</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-card__label">Вузов</div>
+                                <div class="kpi-card__value"><?= count($universities) ?></div>
+                                <div class="kpi-card__hint">партнёров в системе</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-card__label">ИТ-продуктов</div>
+                                <div class="kpi-card__value"><?= count($products) ?></div>
+                                <div class="kpi-card__hint">на витрине ИТ Школы</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-card__label">Средняя фаза</div>
+                                <div class="kpi-card__value"><?= e((string) $avgPhase) ?></div>
+                                <div class="kpi-card__hint">из <?= count($phases) - 1 ?> возможных</div>
+                            </div>
+                        </div>
+
+                        <div class="dash-toolbar">
+                            <div class="dash-toolbar__group">
+                                <span class="dash-toolbar__label">Период:</span>
+                                <button class="dash-toolbar__btn" data-months="3">3 мес</button>
+                                <button class="dash-toolbar__btn" data-months="6">6 мес</button>
+                                <button class="dash-toolbar__btn is-active" data-months="12">12 мес</button>
+                            </div>
+                            <div class="dash-toolbar__group">
+                                <span class="dash-toolbar__label">Тип:</span>
+                                <button class="dash-toolbar__btn is-active" data-act-type="line">Линия</button>
+                                <button class="dash-toolbar__btn" data-act-type="bar">Столбцы</button>
+                                <button class="dash-toolbar__btn" data-act-type="area">Область</button>
+                            </div>
+                            <button class="filter-chip" id="filter-chip" style="display:none;">
+                                <span id="filter-chip-label"></span>
+                                <span class="filter-chip__x">×</span>
+                            </button>
+                        </div>
+
+                        <div class="dash-grid">
+                            <div class="dash-card dash-card--wide">
+                                <div class="dash-card__title">
+                                    Динамика активности
+                                    <span class="dash-card__hint" id="hint-activity">—</span>
+                                </div>
+                                <div class="dash-card__body">
+                                    <canvas id="chart-activity"></canvas>
+                                </div>
+                            </div>
+
+                            <div class="dash-card">
+                                <div class="dash-card__title">
+                                    Распределение по фазам
+                                    <span class="dash-card__hint" id="hint-phases">—</span>
+                                </div>
+                                <div class="dash-card__body">
+                                    <canvas id="chart-phases"></canvas>
+                                </div>
+                            </div>
+
+                            <div class="dash-card">
+                                <div class="dash-card__title">
+                                    Топ вузов
+                                    <span class="dash-card__hint" id="hint-unis">—</span>
+                                </div>
+                                <div class="dash-card__body">
+                                    <canvas id="chart-universities"></canvas>
+                                </div>
+                            </div>
+
+                            <div class="dash-card dash-card--wide">
+                                <div class="dash-card__title">
+                                    Фазы по вузам
+                                    <span class="dash-card__hint" id="hint-stacked">—</span>
+                                </div>
+                                <div class="dash-card__body">
+                                    <canvas id="chart-directions"></canvas>
+                                </div>
+                            </div>
+
+                            <div class="dash-card dash-card--map">
+                                <div class="dash-card__title">
+                                    Карта вузов
+                                    <span class="dash-card__hint" id="hint-map">цвет — преобладающая фаза за период</span>
+                                </div>
+
+                                <div class="russia-map-wrap">
+                                    <svg class="russia-map"
+                                         viewBox="0 0 <?= (int) $mapViewWidth ?> <?= (int) $mapViewHeight ?>"
+                                         preserveAspectRatio="xMidYMid meet"
+                                         xmlns="http://www.w3.org/2000/svg">
+                                        <defs>
+                                            <linearGradient id="map-fill" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stop-color="#f8f4e8"/>
+                                                <stop offset="60%" stop-color="#ede7d3"/>
+                                                <stop offset="100%" stop-color="#e0d6ba"/>
+                                            </linearGradient>
+                                            <linearGradient id="map-sea" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stop-color="#eef3f6"/>
+                                                <stop offset="100%" stop-color="#dfe9ee"/>
+                                            </linearGradient>
+                                            <radialGradient id="map-vignette" cx="50%" cy="50%" r="70%">
+                                                <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
+                                                <stop offset="100%" stop-color="rgba(139,105,20,0.08)"/>
+                                            </radialGradient>
+                                            <filter id="map-glow" x="-20%" y="-20%" width="140%" height="140%">
+                                                <feGaussianBlur stdDeviation="3" result="blur"/>
+                                                <feMerge>
+                                                    <feMergeNode in="blur"/>
+                                                    <feMergeNode in="SourceGraphic"/>
+                                                </feMerge>
+                                            </filter>
+                                            <filter id="map-dot-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                                                <feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-color="#000" flood-opacity="0.32"/>
+                                            </filter>
+                                        </defs>
+
+                                        <rect width="<?= (int) $mapViewWidth ?>" height="<?= (int) $mapViewHeight ?>" fill="url(#map-sea)"/>
+
+                                        <g class="map-grid-layer">
+                                            <?php
+                                            for ($lng = 20; $lng <= 180; $lng += 20) {
+                                                [$gx] = project_point(0, $lng, $mapViewWidth, $mapViewHeight, $lngMin, $lngMax, $latMin, $latMax);
+                                                echo '<line class="map-grid" x1="' . $gx . '" y1="0" x2="' . $gx . '" y2="' . $mapViewHeight . '"/>';
+                                                echo '<text class="map-grid-label" x="' . ($gx + 2) . '" y="10">' . $lng . '°</text>';
+                                            }
+                                            for ($lat = 50; $lat <= 80; $lat += 10) {
+                                                [, $gy] = project_point($lat, 0, $mapViewWidth, $mapViewHeight, $lngMin, $lngMax, $latMin, $latMax);
+                                                echo '<line class="map-grid" x1="0" y1="' . $gy . '" x2="' . $mapViewWidth . '" y2="' . $gy . '"/>';
+                                                echo '<text class="map-grid-label" x="4" y="' . ($gy - 2) . '">' . $lat . '°</text>';
+                                            }
+                                            ?>
+                                        </g>
+
+                                        <path class="russia-outline"
+                                              d="M 56 250
+                                                 Q 60 220 90 200
+                                                 Q 100 180 85 160
+                                                 Q 90 145 110 155
+                                                 Q 130 165 155 190
+                                                 Q 175 200 200 180
+                                                 Q 230 160 280 130
+                                                 Q 320 115 340 160
+                                                 Q 360 170 380 120
+                                                 Q 420 90 470 70
+                                                 Q 520 50 555 105
+                                                 Q 580 115 615 105
+                                                 Q 660 115 700 130
+                                                 Q 760 140 820 155
+                                                 Q 880 165 940 180
+                                                 Q 985 195 1000 195
+                                                 Q 1000 210 975 220
+                                                 Q 960 235 945 260
+                                                 Q 930 285 900 280
+                                                 Q 875 275 855 320
+                                                 Q 850 350 855 375
+                                                 Q 840 380 830 340
+                                                 Q 810 320 780 300
+                                                 Q 765 300 760 340
+                                                 Q 745 375 720 420
+                                                 Q 705 445 690 440
+                                                 Q 685 410 665 395
+                                                 Q 645 390 600 390
+                                                 Q 540 390 470 390
+                                                 Q 430 400 405 400
+                                                 Q 375 395 350 370
+                                                 Q 330 355 305 365
+                                                 Q 275 375 245 400
+                                                 Q 215 425 185 445
+                                                 Q 155 465 130 470
+                                                 Q 105 465 90 440
+                                                 Q 82 415 80 390
+                                                 Q 75 355 65 320
+                                                 Q 56 295 56 250 Z"/>
+
+                                        <rect width="<?= (int) $mapViewWidth ?>" height="<?= (int) $mapViewHeight ?>"
+                                              fill="url(#map-vignette)" pointer-events="none"/>
+
+                                        <text x="<?= (int) ($mapViewWidth / 2) ?>" y="<?= (int) ($mapViewHeight - 18) ?>"
+                                              text-anchor="middle"
+                                              style="font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 500; fill: rgba(139,105,20,0.28); letter-spacing: 0.2em;"
+                                              pointer-events="none">РОССИЙСКАЯ ФЕДЕРАЦИЯ</text>
+
+                                        <g class="map-points-layer">
+                                            <?php foreach ($mapPoints as $p): ?>
+                                                <g class="uni-point"
+                                                   data-uni-id="<?= (int) $p['id'] ?>"
+                                                   data-name="<?= e($p['short']) ?>"
+                                                   data-full="<?= e($p['name']) ?>"
+                                                   data-x="<?= (float) $p['x'] ?>"
+                                                   data-y="<?= (float) $p['y'] ?>">
+                                                    <circle class="uni-point__pulse" r="16"
+                                                            stroke="<?= e($p['color']) ?>"
+                                                            cx="<?= (float) $p['x'] ?>"
+                                                            cy="<?= (float) $p['y'] ?>"/>
+                                                    <circle class="uni-point__halo" r="20"
+                                                            fill="<?= e($p['color']) ?>"
+                                                            cx="<?= (float) $p['x'] ?>"
+                                                            cy="<?= (float) $p['y'] ?>"
+                                                            opacity="0"/>
+                                                    <circle class="uni-point__dot" r="11"
+                                                            fill="<?= e($p['color']) ?>"
+                                                            stroke="#ffffff" stroke-width="2"
+                                                            cx="<?= (float) $p['x'] ?>"
+                                                            cy="<?= (float) $p['y'] ?>"
+                                                            filter="url(#map-dot-shadow)"/>
+                                                    <text class="uni-point__label"
+                                                          x="<?= (float) $p['x'] ?>"
+                                                          y="<?= (float) ($p['y'] + 28) ?>"
+                                                          text-anchor="middle"><?= e($p['short']) ?></text>
+                                                </g>
+                                            <?php endforeach; ?>
+                                        </g>
+                                    </svg>
+
+                                    <div class="map-info" id="map-info" aria-hidden="true">
+                                        <div class="map-info__phase" id="map-info-phase">—</div>
+                                        <div class="map-info__name" id="map-info-name">—</div>
+                                        <div class="map-info__projects" id="map-info-projects">—</div>
+                                    </div>
+                                </div>
+
+                                <div class="map-legend" id="map-legend">
+                                    <?php foreach ($chartPhases as $phase): ?>
+                                        <span class="map-legend__item" data-phase-id="<?= (int) $phase['id'] ?>">
+                                            <span class="map-legend__dot" style="background-color: <?= e($phase['color']) ?>"></span>
+                                            <?= (int) $phase['num'] ?>. <?= e($phase['name']) ?>
+                                        </span>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
             <?php endif; ?>
         </main>
     </div>
@@ -1636,7 +2376,6 @@ $managerLabel = $currentUser !== null
     (function () {
         'use strict';
 
-        // Метаданные фаз — приходят из PHP.
         var PHASES = <?= json_encode($phaseMeta, JSON_UNESCAPED_UNICODE) ?>;
         var phaseByNum = {};
         PHASES.forEach(function (p) { phaseByNum[p.num] = p; });
@@ -1649,6 +2388,12 @@ $managerLabel = $currentUser !== null
         var source = null;
         var pockets = [];
 
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
         function makePocket(phase, direction, rect) {
             var pocket = document.createElement('div');
             pocket.className = 'phase-pocket phase-pocket--' + direction;
@@ -1658,7 +2403,7 @@ $managerLabel = $currentUser !== null
             var arrow = direction === 'prev' ? '↑' : '↓';
             var label = direction === 'prev' ? 'Предыдущая фаза' : 'Следующая фаза';
 
-            var html = ''
+            pocket.innerHTML = ''
                 + '<div class="phase-pocket__pin"></div>'
                 + '<div class="phase-pocket__label">'
                 +   '<span class="phase-pocket__label-arrow">' + arrow + '</span>'
@@ -1669,7 +2414,6 @@ $managerLabel = $currentUser !== null
                 +   '<span class="phase-pocket__name">' + escapeHtml(phase.name) + '</span>'
                 +   (phase.requires_confirmation ? '<span class="phase-pocket__lock" title="Требует подтверждения вуза">🔒</span>' : '')
                 + '</div>';
-            pocket.innerHTML = html;
 
             var pw = 240;
             var left = rect.left + rect.width / 2 - pw / 2;
@@ -1679,17 +2423,10 @@ $managerLabel = $currentUser !== null
             var top;
             if (direction === 'prev') {
                 top = rect.top - 90 - gap;
-                if (top < 8) {
-                    // Не влезает сверху — перекидываем вниз, но со смещением по горизонтали
-                    top = rect.bottom + gap;
-                    left = Math.max(8, left - 60);
-                }
+                if (top < 8) { top = rect.bottom + gap; left = Math.max(8, left - 60); }
             } else {
                 top = rect.bottom + gap;
-                if (top + 90 > window.innerHeight - 8) {
-                    top = rect.top - 90 - gap;
-                    left = Math.max(8, left + 60);
-                }
+                if (top + 90 > window.innerHeight - 8) { top = rect.top - 90 - gap; left = Math.max(8, left + 60); }
             }
             top = Math.max(8, Math.min(top, window.innerHeight - 96));
 
@@ -1697,42 +2434,26 @@ $managerLabel = $currentUser !== null
             pocket.style.top = top + 'px';
             pocket.style.width = pw + 'px';
 
-            // Наведение и дроп
             pocket.addEventListener('dragover', function (e) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
                 pocket.classList.add('is-hover');
             });
-            pocket.addEventListener('dragleave', function () {
-                pocket.classList.remove('is-hover');
-            });
+            pocket.addEventListener('dragleave', function () { pocket.classList.remove('is-hover'); });
             pocket.addEventListener('drop', function (e) {
                 e.preventDefault();
                 if (!source) return;
-                var projectId = source.dataset.project;
-                var targetPhaseId = pocket.dataset.phaseId;
-                doMove(projectId, targetPhaseId);
+                doMove(source.dataset.project, pocket.dataset.phaseId);
             });
 
             document.body.appendChild(pocket);
-            // Плавное появление
-            requestAnimationFrame(function () {
-                pocket.classList.add('is-visible');
-            });
+            requestAnimationFrame(function () { pocket.classList.add('is-visible'); });
             pockets.push(pocket);
-        }
-
-        function escapeHtml(s) {
-            return String(s).replace(/[&<>"']/g, function (c) {
-                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-            });
         }
 
         function cleanup() {
             document.body.classList.remove('is-dragging');
-            cells.forEach(function (c) {
-                c.classList.remove('is-drag-source');
-            });
+            cells.forEach(function (c) { c.classList.remove('is-drag-source'); });
             pockets.forEach(function (p) { p.remove(); });
             pockets = [];
             source = null;
@@ -1752,17 +2473,10 @@ $managerLabel = $currentUser !== null
             })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                if (!data || !data.ok) {
-                    alert((data && data.error) || 'Не удалось переместить листок');
-                    return;
-                }
-                // Обновляем страницу на проект-источник: рабочий процесс сверху
-                // синхронизируется с перемещённым листком.
+                if (!data || !data.ok) { alert((data && data.error) || 'Не удалось переместить листок'); return; }
                 window.location.href = 'index.php?role=manager&project=' + pid;
             })
-            .catch(function () {
-                alert('Ошибка сети. Попробуйте ещё раз.');
-            });
+            .catch(function () { alert('Ошибка сети. Попробуйте ещё раз.'); });
         }
 
         cells.forEach(function (td) {
@@ -1779,19 +2493,15 @@ $managerLabel = $currentUser !== null
                 if (prev) makePocket(prev, 'prev', rect);
                 if (next) makePocket(next, 'next', rect);
 
-                var payload = JSON.stringify({
+                e.dataTransfer.setData('text/plain', JSON.stringify({
                     projectId: td.dataset.project,
                     fromPhaseId: td.dataset.phaseId
-                });
-                e.dataTransfer.setData('text/plain', payload);
+                }));
                 e.dataTransfer.effectAllowed = 'move';
             });
 
-            td.addEventListener('dragend', function () {
-                cleanup();
-            });
+            td.addEventListener('dragend', function () { cleanup(); });
 
-            // Обычный клик (без перетаскивания) — выбрать проект.
             td.addEventListener('click', function () {
                 if (source !== null) return;
                 window.location.href = 'index.php?role=manager&project=' + td.dataset.project;
@@ -1804,6 +2514,701 @@ $managerLabel = $currentUser !== null
                 }
             });
         });
+    })();
+    </script>
+    <?php endif; ?>
+
+    <?php if ($viewRole === 'supervisor' && $currentUser !== null): ?>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+    (function () {
+        'use strict';
+
+        var DASH = <?= json_encode($dashPayload, JSON_UNESCAPED_UNICODE) ?>;
+
+        var accent = '#8b6914';
+        var accentDark = '#6b5010';
+        var gridColor = 'rgba(26, 26, 26, 0.08)';
+        var textColor = '#4a4a4a';
+
+        Chart.defaults.font.family = "'Inter', -apple-system, sans-serif";
+        Chart.defaults.font.size = 11;
+        Chart.defaults.color = textColor;
+
+        var state = {
+            months: 12,
+            chartType: 'line',   // 'line' | 'bar' | 'area'
+            phaseId: null,
+            uniId: null,
+            aggregate: null
+        };
+
+        var charts = {
+            activity: null,
+            phases: null,
+            unis: null,
+            stacked: null
+        };
+
+        function phaseById(id) {
+            for (var i = 0; i < DASH.phases.length; i++) {
+                if (DASH.phases[i].id === id) return DASH.phases[i];
+            }
+            return null;
+        }
+
+        function uniById(id) {
+            for (var i = 0; i < DASH.universities.length; i++) {
+                if (DASH.universities[i].id === id) return DASH.universities[i];
+            }
+            return null;
+        }
+
+        function anyUniById(id) {
+            for (var i = 0; i < DASH.allUniversities.length; i++) {
+                if (DASH.allUniversities[i].id === id) return DASH.allUniversities[i];
+            }
+            return null;
+        }
+
+        function hexWithAlpha(hex, alpha) {
+            if (!hex || hex.charAt(0) !== '#') return hex;
+            var h = hex.substring(1);
+            if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            var r = parseInt(h.substring(0, 2), 16);
+            var g = parseInt(h.substring(2, 4), 16);
+            var b = parseInt(h.substring(4, 6), 16);
+            return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+        }
+
+        // ===== Агрегация по выбранному периоду =====
+        function aggregateMonths(n) {
+            var slice = DASH.monthly.slice(-n);
+            var byUniPhase = {};
+            var labels = [];
+            var activity = [];
+            var newProjects = [];
+
+            slice.forEach(function (m, idx) {
+                labels.push(m.label);
+                var monthTotal = 0;
+                Object.keys(m.byUniPhase).forEach(function (uid) {
+                    if (!byUniPhase[uid]) byUniPhase[uid] = {};
+                    var u = m.byUniPhase[uid];
+                    Object.keys(u).forEach(function (pid) {
+                        byUniPhase[uid][pid] = (byUniPhase[uid][pid] || 0) + u[pid];
+                        monthTotal += u[pid];
+                    });
+                });
+                activity.push(monthTotal);
+                newProjects.push(DASH.newProjects[DASH.newProjects.length - n + idx] || 1);
+            });
+
+            return {
+                labels: labels,
+                activity: activity,
+                newProjects: newProjects,
+                byUniPhase: byUniPhase
+            };
+        }
+
+        function computeByPhase() {
+            var res = {};
+            DASH.phases.forEach(function (p) { res[p.id] = 0; });
+
+            Object.keys(state.aggregate.byUniPhase).forEach(function (uid) {
+                if (state.uniId && parseInt(uid, 10) !== state.uniId) return;
+                var u = state.aggregate.byUniPhase[uid];
+                Object.keys(u).forEach(function (pid) {
+                    var key = parseInt(pid, 10);
+                    if (res[key] !== undefined) res[key] += u[pid];
+                });
+            });
+            return res;
+        }
+
+        function computeByUni() {
+            var res = {};
+            DASH.universities.forEach(function (u) { res[u.id] = 0; });
+
+            Object.keys(state.aggregate.byUniPhase).forEach(function (uidStr) {
+                var uid = parseInt(uidStr, 10);
+                var u = state.aggregate.byUniPhase[uidStr];
+                Object.keys(u).forEach(function (pidStr) {
+                    var pid = parseInt(pidStr, 10);
+                    if (state.phaseId && pid !== state.phaseId) return;
+                    if (res[uid] !== undefined) res[uid] += u[pidStr];
+                });
+            });
+            return res;
+        }
+
+        function topPhaseForUni(uid) {
+            var u = state.aggregate.byUniPhase[String(uid)];
+            if (!u) return null;
+            var maxCount = 0;
+            var maxPid = null;
+            Object.keys(u).forEach(function (pidStr) {
+                if (u[pidStr] > maxCount) {
+                    maxCount = u[pidStr];
+                    maxPid = parseInt(pidStr, 10);
+                }
+            });
+            return maxPid;
+        }
+
+        function phaseColorById(pid) {
+            var p = phaseById(pid);
+            return p ? p.color : '#9ca3af';
+        }
+
+        function rebuildAggregate() {
+            state.aggregate = aggregateMonths(state.months);
+        }
+
+        // ===== График активности =====
+        function renderActivity() {
+            var canvas = document.getElementById('chart-activity');
+            if (!canvas) return;
+
+            if (charts.activity) {
+                charts.activity.destroy();
+                charts.activity = null;
+            }
+
+            var labels = state.aggregate.labels;
+            var actData = state.aggregate.activity;
+            var newData = state.aggregate.newProjects;
+
+            var gradient = canvas.getContext('2d').createLinearGradient(0, 0, 0, 260);
+            gradient.addColorStop(0, 'rgba(139, 105, 20, 0.4)');
+            gradient.addColorStop(1, 'rgba(139, 105, 20, 0.02)');
+
+            var type = state.chartType === 'bar' ? 'bar' : 'line';
+            var fill = state.chartType === 'area';
+
+            var datasets = [
+                {
+                    label: 'Активность',
+                    data: actData,
+                    borderColor: accent,
+                    backgroundColor: type === 'bar' ? accent : (fill ? gradient : 'rgba(139, 105, 20, 0.08)'),
+                    fill: fill || type === 'bar',
+                    tension: 0.35,
+                    pointBackgroundColor: accent,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: type === 'bar' ? 0 : 4,
+                    pointHoverRadius: type === 'bar' ? 0 : 7,
+                    borderWidth: 2,
+                    borderRadius: type === 'bar' ? 3 : 0,
+                    barPercentage: 0.6
+                },
+                {
+                    label: 'Новые проекты',
+                    data: newData,
+                    borderColor: accentDark,
+                    backgroundColor: 'transparent',
+                    borderDash: type === 'bar' ? [] : [4, 4],
+                    tension: 0.35,
+                    pointBackgroundColor: accentDark,
+                    pointRadius: type === 'bar' ? 0 : 3,
+                    pointHoverRadius: 5,
+                    borderWidth: 1.5,
+                    type: 'line',
+                    hidden: type === 'bar'
+                }
+            ];
+
+            charts.activity = new Chart(canvas, {
+                type: type,
+                data: { labels: labels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 500, easing: 'easeOutQuart' },
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 14, font: { size: 11 } } },
+                        tooltip: {
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
+                            padding: 10,
+                            cornerRadius: 2,
+                            titleFont: { size: 12, weight: '600' },
+                            bodyFont: { size: 12 }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor } },
+                        y: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } }
+                    }
+                }
+            });
+        }
+
+        // ===== Распределение по фазам =====
+        function renderPhases() {
+            var canvas = document.getElementById('chart-phases');
+            if (!canvas) return;
+
+            if (charts.phases) {
+                charts.phases.destroy();
+                charts.phases = null;
+            }
+
+            var byPhase = computeByPhase();
+            var labels = DASH.phases.map(function (p) { return p.num + '. ' + p.name; });
+            var colors = DASH.phases.map(function (p) { return p.color; });
+            var data = DASH.phases.map(function (p) { return byPhase[p.id] || 0; });
+            var alphas = DASH.phases.map(function (p) {
+                if (state.phaseId && p.id !== state.phaseId) return 0.22;
+                return 1;
+            });
+
+            charts.phases = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: colors.map(function (c, i) { return hexWithAlpha(c, alphas[i]); }),
+                        borderColor: '#fff',
+                        borderWidth: 2,
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%',
+                    animation: { duration: 500, easing: 'easeOutQuart' },
+                    onClick: function (evt, els) {
+                        if (!els || !els.length) return;
+                        var idx = els[0].index;
+                        var pid = DASH.phases[idx].id;
+                        state.phaseId = (state.phaseId === pid) ? null : pid;
+                        refreshAll();
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { boxWidth: 10, boxHeight: 10, padding: 8, font: { size: 10 } }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
+                            padding: 10,
+                            cornerRadius: 2,
+                            callbacks: {
+                                label: function (ctx) { return ctx.label + ': ' + ctx.parsed + ' проектов'; }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ===== Топ вузов (bar / line / area) =====
+        function renderUnis() {
+            var canvas = document.getElementById('chart-universities');
+            if (!canvas) return;
+
+            if (charts.unis) {
+                charts.unis.destroy();
+                charts.unis = null;
+            }
+
+            var byUni = computeByUni();
+            var labels = DASH.universities.map(function (u) { return u.short; });
+            var data = DASH.universities.map(function (u) { return byUni[u.id] || 0; });
+
+            var bgs = DASH.universities.map(function (u) {
+                if (state.uniId && u.id !== state.uniId) return hexWithAlpha(accent, 0.22);
+                return accent;
+            });
+            var hoverBgs = DASH.universities.map(function (u) {
+                if (state.uniId && u.id !== state.uniId) return hexWithAlpha(accentDark, 0.3);
+                return accentDark;
+            });
+
+            var type = state.chartType === 'bar' ? 'bar' : 'line';
+            var fill = state.chartType === 'area';
+
+            var dataset;
+            var options;
+
+            if (type === 'bar') {
+                dataset = {
+                    label: 'Проектов',
+                    data: data,
+                    backgroundColor: bgs,
+                    hoverBackgroundColor: hoverBgs,
+                    borderRadius: 3,
+                    barThickness: 16
+                };
+
+                options = {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 500, easing: 'easeOutQuart' },
+                    onClick: function (evt, els) {
+                        if (!els || !els.length) return;
+                        var idx = els[0].index;
+                        var uid = DASH.universities[idx].id;
+                        state.uniId = (state.uniId === uid) ? null : uid;
+                        refreshAll();
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
+                            padding: 10,
+                            cornerRadius: 2,
+                            callbacks: {
+                                label: function (ctx) {
+                                    var v = ctx.parsed && ctx.parsed.x !== undefined ? ctx.parsed.x : ctx.parsed;
+                                    return 'Проектов: ' + v;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } },
+                        y: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } }
+                    }
+                };
+            } else {
+                dataset = {
+                    label: 'Проектов',
+                    data: data,
+                    borderColor: accent,
+                    backgroundColor: fill ? hexWithAlpha(accent, 0.35) : hexWithAlpha(accent, 0.1),
+                    fill: fill,
+                    tension: 0.35,
+                    pointBackgroundColor: accent,
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 8,
+                    borderWidth: 2
+                };
+
+                options = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 500, easing: 'easeOutQuart' },
+                    onClick: function (evt, els) {
+                        if (!els || !els.length) return;
+                        var idx = els[0].index;
+                        var uid = DASH.universities[idx].id;
+                        state.uniId = (state.uniId === uid) ? null : uid;
+                        refreshAll();
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
+                            padding: 10,
+                            cornerRadius: 2,
+                            callbacks: {
+                                label: function (ctx) {
+                                    var v = ctx.parsed && ctx.parsed.y !== undefined ? ctx.parsed.y : ctx.parsed;
+                                    return 'Проектов: ' + v;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 }, autoSkip: false, maxRotation: 45, minRotation: 0 } },
+                        y: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } }
+                    }
+                };
+            }
+
+            charts.unis = new Chart(canvas, {
+                type: type,
+                data: { labels: labels, datasets: [dataset] },
+                options: options
+            });
+        }
+
+        // ===== Фазы по вузам =====
+        function renderStacked() {
+            var canvas = document.getElementById('chart-directions');
+            if (!canvas) return;
+
+            if (charts.stacked) {
+                charts.stacked.destroy();
+                charts.stacked = null;
+            }
+
+            var byUniPhase = state.aggregate.byUniPhase;
+            var uniLabels = DASH.universities.map(function (u) { return u.short; });
+            var phaseIds = DASH.phases.map(function (p) { return p.id; });
+            var phaseLabels = DASH.phases.map(function (p) { return p.num + '. ' + p.name; });
+            var phaseColors = DASH.phases.map(function (p) { return p.color; });
+
+            var type = state.chartType === 'bar' ? 'bar' : 'line';
+            var fill = state.chartType === 'area';
+
+            var datasets = [];
+            for (var i = 0; i < phaseIds.length; i++) {
+                var pid = phaseIds[i];
+                var isDimmed = state.phaseId && state.phaseId !== pid;
+                var data = DASH.universities.map(function (u) {
+                    if (state.uniId && u.id !== state.uniId) return 0;
+                    var uData = byUniPhase[String(u.id)];
+                    return uData ? (uData[String(pid)] || 0) : 0;
+                });
+
+                var alpha = isDimmed ? 0.22 : 1;
+                var ds = {
+                    label: phaseLabels[i],
+                    data: data,
+                    borderColor: phaseColors[i],
+                    borderWidth: 2,
+                    tension: 0.35,
+                    pointBackgroundColor: phaseColors[i],
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 1.5,
+                    pointRadius: type === 'bar' ? 0 : 4,
+                    pointHoverRadius: 6
+                };
+
+                if (type === 'bar') {
+                    ds.backgroundColor = hexWithAlpha(phaseColors[i], alpha * 0.9);
+                    ds.borderRadius = 2;
+                    ds.stack = 'phases';
+                } else {
+                    ds.backgroundColor = fill ? hexWithAlpha(phaseColors[i], alpha * 0.35) : 'transparent';
+                    ds.fill = fill;
+                }
+
+                datasets.push(ds);
+            }
+
+            charts.stacked = new Chart(canvas, {
+                type: type,
+                data: { labels: uniLabels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 500, easing: 'easeOutQuart' },
+                    plugins: {
+                        legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, padding: 10, font: { size: 10 } } },
+                        tooltip: {
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
+                            padding: 10,
+                            cornerRadius: 2
+                        }
+                    },
+                    scales: {
+                        x: { stacked: type === 'bar', grid: { display: false }, ticks: { color: textColor } },
+                        y: { stacked: type === 'bar', beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } }
+                    }
+                }
+            });
+        }
+
+        // ===== Карта =====
+        function renderMap() {
+            var mapWrap = document.querySelector('.russia-map-wrap');
+            if (!mapWrap) return;
+
+            var points = mapWrap.querySelectorAll('.uni-point');
+
+            points.forEach(function (g) {
+                var uid = parseInt(g.dataset.uniId, 10);
+                g.classList.remove('is-dimmed', 'is-selected');
+
+                var topPid = topPhaseForUni(uid);
+                var color = topPid ? phaseColorById(topPid) : '#9ca3af';
+
+                var dot = g.querySelector('.uni-point__dot');
+                var halo = g.querySelector('.uni-point__halo');
+                var pulse = g.querySelector('.uni-point__pulse');
+                if (dot) dot.setAttribute('fill', color);
+                if (halo) halo.setAttribute('fill', color);
+                if (pulse) pulse.setAttribute('stroke', color);
+
+                var hasData = state.aggregate.byUniPhase[String(uid)] !== undefined;
+
+                if (state.uniId && uid === state.uniId) {
+                    g.classList.add('is-selected');
+                    return;
+                }
+                if (state.phaseId) {
+                    var uData = state.aggregate.byUniPhase[String(uid)];
+                    var inPhase = uData && uData[String(state.phaseId)];
+                    if (!inPhase) g.classList.add('is-dimmed');
+                } else if (state.uniId && uid !== state.uniId) {
+                    g.classList.add('is-dimmed');
+                } else if (!hasData) {
+                    g.classList.add('is-dimmed');
+                }
+            });
+
+            var legendItems = document.querySelectorAll('.map-legend__item');
+            legendItems.forEach(function (li) {
+                var pid = parseInt(li.dataset.phaseId, 10);
+                li.classList.toggle('is-active', state.phaseId === pid);
+            });
+        }
+
+        // ===== Подсказки =====
+        function updateChip() {
+            var chip = document.getElementById('filter-chip');
+            var label = document.getElementById('filter-chip-label');
+            if (!chip || !label) return;
+
+            var parts = [];
+            if (state.uniId) {
+                var u = uniById(state.uniId) || anyUniById(state.uniId);
+                if (u) parts.push('Вуз: ' + u.short);
+            }
+            if (state.phaseId) {
+                var p = phaseById(state.phaseId);
+                if (p) parts.push('Фаза: ' + p.num + '. ' + p.name);
+            }
+
+            if (parts.length === 0) {
+                chip.style.display = 'none';
+            } else {
+                chip.style.display = 'inline-flex';
+                label.textContent = parts.join('  ·  ');
+            }
+        }
+
+        function updateHints() {
+            var typeLabel = state.chartType === 'line' ? 'линия'
+                : (state.chartType === 'bar' ? 'столбцы' : 'область');
+
+            var hAct = document.getElementById('hint-activity');
+            if (hAct) hAct.textContent = 'последние ' + state.months + ' мес · ' + typeLabel;
+
+            var hPh = document.getElementById('hint-phases');
+            if (hPh) hPh.textContent = 'за ' + state.months + ' мес · клик — фильтр';
+
+            var hUn = document.getElementById('hint-unis');
+            if (hUn) hUn.textContent = 'за ' + state.months + ' мес · ' + typeLabel + ' · клик — фильтр';
+
+            var hSt = document.getElementById('hint-stacked');
+            if (hSt) hSt.textContent = 'за ' + state.months + ' мес · ' + typeLabel;
+
+            var hMap = document.getElementById('hint-map');
+            if (hMap) hMap.textContent = 'за ' + state.months + ' мес · цвет — преобладающая фаза';
+        }
+
+        function refreshAll() {
+            rebuildAggregate();
+            renderPhases();
+            renderUnis();
+            renderStacked();
+            renderMap();
+            updateChip();
+            updateHints();
+        }
+
+        // ===== Первичная отрисовка =====
+        rebuildAggregate();
+        renderActivity();
+        renderPhases();
+        renderUnis();
+        renderStacked();
+        renderMap();
+        updateChip();
+        updateHints();
+
+        // ===== Тулбар: период =====
+        var monthBtns = document.querySelectorAll('[data-months]');
+        monthBtns.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                monthBtns.forEach(function (b) { b.classList.remove('is-active'); });
+                btn.classList.add('is-active');
+                state.months = parseInt(btn.dataset.months, 10);
+                refreshAll();
+                renderActivity();
+            });
+        });
+
+        // ===== Тулбар: тип графика =====
+        var typeBtns = document.querySelectorAll('[data-act-type]');
+        typeBtns.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                typeBtns.forEach(function (b) { b.classList.remove('is-active'); });
+                btn.classList.add('is-active');
+                state.chartType = btn.dataset.actType;
+                renderActivity();
+                renderUnis();
+                renderStacked();
+                updateHints();
+            });
+        });
+
+        // ===== Сброс фильтров =====
+        var chip = document.getElementById('filter-chip');
+        if (chip) {
+            chip.addEventListener('click', function () {
+                state.phaseId = null;
+                state.uniId = null;
+                refreshAll();
+            });
+        }
+
+        // ===== Легенда карты =====
+        var legendItems = document.querySelectorAll('.map-legend__item');
+        legendItems.forEach(function (li) {
+            li.addEventListener('click', function () {
+                var pid = parseInt(li.dataset.phaseId, 10);
+                state.phaseId = (state.phaseId === pid) ? null : pid;
+                refreshAll();
+            });
+        });
+
+        // ===== Точки на карте =====
+        var mapWrap = document.querySelector('.russia-map-wrap');
+        var mapInfo = document.getElementById('map-info');
+
+        if (mapWrap && mapInfo) {
+            var infoPhase    = document.getElementById('map-info-phase');
+            var infoName     = document.getElementById('map-info-name');
+            var infoProjects = document.getElementById('map-info-projects');
+
+            var points = mapWrap.querySelectorAll('.uni-point');
+
+            points.forEach(function (g) {
+                var uid = parseInt(g.dataset.uniId, 10);
+                var fullName = g.dataset.full || '';
+                var short = g.dataset.name || '';
+
+                g.addEventListener('mouseenter', function () {
+                    var topPid = topPhaseForUni(uid);
+                    var topPhase = topPid ? phaseById(topPid) : null;
+                    var phaseName = topPhase ? (topPhase.num + '. ' + topPhase.name) : 'Не начато';
+                    var color = topPhase ? topPhase.color : '#8b6914';
+
+                    var uData = state.aggregate.byUniPhase[String(uid)] || {};
+                    var total = 0;
+                    Object.keys(uData).forEach(function (k) { total += uData[k]; });
+
+                    infoPhase.textContent = phaseName;
+                    infoPhase.style.color = color;
+                    infoName.textContent = short;
+                    infoName.title = fullName;
+                    infoProjects.textContent = 'Проектов за период: ' + total + ' · клик — фильтр';
+                    mapInfo.classList.add('is-visible');
+                });
+
+                g.addEventListener('mouseleave', function () {
+                    mapInfo.classList.remove('is-visible');
+                });
+
+                g.addEventListener('click', function () {
+                    state.uniId = (state.uniId === uid) ? null : uid;
+                    refreshAll();
+                });
+            });
+        }
     })();
     </script>
     <?php endif; ?>
