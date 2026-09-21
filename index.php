@@ -2,13 +2,15 @@
 /**
  * Точка входа CRM «ИТ Школа РТК» (прототип).
  *
- * Роли:
- *   - manager: рабочий процесс + сетка проектов с drag-and-drop листочков;
- *   - university: рабочие процессы вуза + баннер подтверждения перехода;
- *   - supervisor: интерактивный дашборд — KPI, живые графики (Chart.js),
- *     стилизованная SVG-карта России без внешних API-ключей, cross-filtering.
+ * Роли (4):
+ *   - supervisor: сводный дашборд;
+ *   - manager: рабочий процесс + сетка проектов + «Статистика студентов»
+ *     при фазе «Ведение занятий» (11);
+ *   - university: рабочие процессы вуза + матрица студентов и их проектных фаз;
+ *   - student: карточка своего проекта с этапами и git-историей.
  *
- * Фильтры периода и типа графика влияют на ВСЕ графики и карту.
+ * Студенческий проект: Выбор темы → Работа над проектом →
+ * Предварительная защита → Защита проекта.
  */
 
 session_start();
@@ -227,7 +229,7 @@ $universityMarks = [
     5  => ['code' => 'НГУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1c/Novosibirsk_State_University_logo.svg/60px-Novosibirsk_State_University_logo.svg.png'],
     6  => ['code' => 'УрФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Ural_Federal_University_Logo.svg/60px-Ural_Federal_University_Logo.svg.png'],
     7  => ['code' => 'ЮФУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Southern_Federal_University_logo.svg/60px-Southern_Federal_University_logo.svg.png'],
-    8  => ['code' => 'ДВФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Far_Eastern_Federal_University_Logo.svg/60px-Far_Eastern_Federal_University_Logo.svg.png'],
+    8  => ['code' => 'ДВФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Far_Eastern_Federal_University_Logo.svg/60px-Far_Eastern_Federal_University_logo.svg.png'],
     9  => ['code' => 'ТПУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/TPU_logo.svg/60px-TPU_logo.svg.png'],
     10 => ['code' => 'КНИТУ-КАИ', 'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Kazan_National_Research_Technical_University_logo.svg/60px-Kazan_National_Research_Technical_University_logo.svg.png'],
 ];
@@ -437,6 +439,46 @@ $workflow = build_project_workflow(
 );
 
 // =============================================================================
+// Студенческие проектные фазы
+// =============================================================================
+// Выбор темы → Работа над проектом → Предварительная защита → Защита проекта
+
+$studentPhases = [
+    ['code' => 'topic',   'num' => 1, 'name' => 'Выбор темы',             'color' => '#8b6914'],
+    ['code' => 'work',    'num' => 2, 'name' => 'Работа над проектом',     'color' => '#2563eb'],
+    ['code' => 'predef',  'num' => 3, 'name' => 'Предварительная защита',  'color' => '#d97706'],
+    ['code' => 'defense', 'num' => 4, 'name' => 'Защита проекта',          'color' => '#16a34a'],
+];
+
+$studentPhaseByNum = [];
+foreach ($studentPhases as $sp) {
+    $studentPhaseByNum[(int) $sp['num']] = $sp;
+}
+
+// Mock-студенты курса (демо)
+$mockStudents = [
+    ['id' => 1, 'name' => 'Иванов Иван Иванович',       'group' => 'ИУ7-41Б',  'phase' => 2, 'topic' => 'ML-модель для телекома',       'grade' => null],
+    ['id' => 2, 'name' => 'Петрова Анна Сергеевна',     'group' => 'ИУ7-41Б',  'phase' => 3, 'topic' => 'Аналитика оттока клиентов',     'grade' => null],
+    ['id' => 3, 'name' => 'Сидоров Пётр Алексеевич',    'group' => 'ИУ7-42Б',  'phase' => 4, 'topic' => 'Чат-бот поддержки на LLM',      'grade' => 5],
+    ['id' => 4, 'name' => 'Кузнецова Мария Дмитриевна', 'group' => 'ИУ7-42Б',  'phase' => 2, 'topic' => 'Прогноз нагрузки сети',         'grade' => null],
+    ['id' => 5, 'name' => 'Смирнов Олег Викторович',    'group' => 'ИУ7-43Б',  'phase' => 1, 'topic' => '—',                              'grade' => null],
+    ['id' => 6, 'name' => 'Волкова Ольга Игоревна',     'group' => 'ИУ7-43Б',  'phase' => 3, 'topic' => 'Дашборд качества связи',        'grade' => null],
+    ['id' => 7, 'name' => 'Никитин Артём Павлович',     'group' => 'ИУ7-44Б',  'phase' => 4, 'topic' => 'Классификация обращений',       'grade' => 4],
+    ['id' => 8, 'name' => 'Морозова Дарья Ивановна',    'group' => 'ИУ7-44Б',  'phase' => 2, 'topic' => 'Рекомендации тарифов',          'grade' => null],
+    ['id' => 9, 'name' => 'Федотов Кирилл Андреевич',   'group' => 'ИУ7-45Б',  'phase' => 1, 'topic' => '—',                              'grade' => null],
+    ['id' => 10,'name' => 'Романова Елизавета Олеговна','group' => 'ИУ7-45Б',  'phase' => 3, 'topic' => 'Оптимизация маршрутизации',     'grade' => null],
+];
+
+// История проекта в стиле git log
+$mockGitHistory = [
+    ['hash' => 'a3f9c12', 'date' => '20.09 14:23', 'author' => 'Иванов И.И.',      'message' => 'Добавлен раздел «Введение»'],
+    ['hash' => 'b7e2a45', 'date' => '19.09 18:07', 'author' => 'Иванов И.И.',      'message' => 'Постановка задачи и цели работы'],
+    ['hash' => 'c1d4f88', 'date' => '19.09 11:52', 'author' => 'Преподаватель',    'message' => 'Ревью: рекомендации по структуре'],
+    ['hash' => 'd92b8e1', 'date' => '18.09 20:31', 'author' => 'Иванов И.И.',      'message' => 'Инициализация репозитория и README'],
+    ['hash' => 'e45a3c7', 'date' => '18.09 12:00', 'author' => 'ИТ Школа РТК',     'message' => 'Создание шаблона курсового проекта'],
+];
+
+// =============================================================================
 // Данные для дашборда руководителя
 // =============================================================================
 
@@ -501,7 +543,7 @@ foreach ($universities as $u) {
 usort($topUniversities, function ($a, $b) { return $b['count'] - $a['count']; });
 $topUniversities = array_slice($topUniversities, 0, 8);
 
-// ===== Помесячные mock-данные с разбивкой «вуз × фаза» =====================
+// Помесячные mock-данные
 $monthsRu = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 $nowMonth = (int) date('n');
 
@@ -536,7 +578,7 @@ for ($i = 11; $i >= 0; $i--) {
     ];
 }
 
-// ===== Карта: проекция lat/lng → SVG =======================================
+// Карта
 $mapViewWidth  = 1000;
 $mapViewHeight = 500;
 $lngMin = 19.0;  $lngMax = 180.0;
@@ -589,7 +631,6 @@ foreach ($universities as $u) {
     ];
 }
 
-// ===== Payload для JS-дашборда =============================================
 $dashPayload = [
     'phases' => array_map(function ($p) {
         return [
@@ -616,20 +657,12 @@ $dashPayload = [
     'mapPoints'   => $mapPoints,
     'monthly'     => $monthly,
     'newProjects' => $chartNewProjectsByMonth,
-    'kpi' => [
-        'total'    => $totalInteractions,
-        'active'   => $activeInteractions,
-        'unis'     => count($universities),
-        'products' => count($products),
-        'avgPhase' => $avgPhase,
-        'maxPhase' => count($phases) - 1,
-    ],
 ];
 
 // ===== Переключатель ролей ==================================================
 
 $viewRole = $_GET['role'] ?? 'manager';
-if (!in_array($viewRole, ['manager', 'university', 'supervisor'], true)) {
+if (!in_array($viewRole, ['manager', 'university', 'supervisor', 'student'], true)) {
     $viewRole = 'manager';
 }
 
@@ -673,6 +706,19 @@ if ($managerNotification !== null) {
 $managerLabel = $currentUser !== null
     ? ($currentUser['full_name'] ?: $currentUser['login'])
     : 'Павел';
+
+// Для роли «Студент» — выбранный студент
+$viewStudentId = (int) ($_GET['student_id'] ?? 0);
+if ($viewRole === 'student' && $viewStudentId === 0 && $mockStudents !== []) {
+    $viewStudentId = (int) $mockStudents[0]['id'];
+}
+$selectedStudent = null;
+foreach ($mockStudents as $s) {
+    if ((int) $s['id'] === $viewStudentId) {
+        $selectedStudent = $s;
+        break;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -682,7 +728,7 @@ $managerLabel = $currentUser !== null
     <title>CRM «ИТ Школа РТК»</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
             --color-primary: #1a1a1a;
@@ -695,6 +741,7 @@ $managerLabel = $currentUser !== null
             --color-accent-dark: #6b5010;
             --font-serif: 'Cormorant Garamond', serif;
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
             --space-xs: 0.5rem;
             --space-sm: 1rem;
             --space-md: 1.5rem;
@@ -807,13 +854,29 @@ $managerLabel = $currentUser !== null
 
         .topbar__user { display: flex; align-items: center; gap: var(--space-sm); font-size: 0.9rem; }
 
-        .role-switch { display: inline-flex; border: 1px solid rgba(26, 26, 26, 0.18); background-color: var(--color-white); }
+        /* ===== Переключатель ролей: 2 строки ===== */
+        .role-switch {
+            display: inline-flex;
+            flex-direction: column;
+            border: 1px solid rgba(26, 26, 26, 0.18);
+            background-color: var(--color-white);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .role-switch__row {
+            display: flex;
+        }
+
+        .role-switch__row + .role-switch__row {
+            border-top: 1px solid rgba(26, 26, 26, 0.18);
+        }
 
         .role-switch__btn {
             display: inline-flex;
             align-items: center;
             gap: 0.4rem;
-            padding: 0.45rem 0.85rem;
+            padding: 0.5rem 0.9rem;
             font-size: 0.8rem;
             font-weight: 500;
             color: var(--color-secondary);
@@ -821,6 +884,8 @@ $managerLabel = $currentUser !== null
             border-right: 1px solid rgba(26, 26, 26, 0.18);
             transition: var(--transition-base);
             white-space: nowrap;
+            flex: 1;
+            justify-content: flex-start;
         }
 
         .role-switch__btn:last-child { border-right: none; }
@@ -828,8 +893,14 @@ $managerLabel = $currentUser !== null
         .role-switch__btn.active { background-color: var(--color-accent); color: var(--color-white); }
         .role-switch__btn.active:hover { color: var(--color-white); }
 
-        .role-switch__dot { width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-accent); flex-shrink: 0; }
-        .role-switch__btn.active .role-switch__dot { background-color: var(--color-white); }
+        .role-switch__emoji {
+            font-size: 1rem;
+            line-height: 1;
+            flex-shrink: 0;
+            filter: saturate(0.9);
+        }
+
+        .role-switch__label { white-space: nowrap; }
 
         .topbar__logout {
             padding: 0.5rem var(--space-md);
@@ -910,13 +981,15 @@ $managerLabel = $currentUser !== null
 
         .workspace { display: flex; flex-direction: column; gap: var(--space-md); min-height: calc(100vh - 46px); }
         .workspace--uni { min-height: calc(100vh - 46px - 62px); }
-        .workspace--uni .panel--workflow { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+        .workspace--uni .panel--workflow { flex: 0 0 auto; min-height: 180px; display: flex; flex-direction: column; }
         .workspace--dash { min-height: calc(100vh - 46px - 62px); }
+        .workspace--student { min-height: calc(100vh - 46px - 62px); }
 
         .panel { background-color: var(--color-white); border: 1px solid rgba(26, 26, 26, 0.1); padding: var(--space-md); }
         .panel--workflow { flex: 0 0 auto; min-height: 230px; display: flex; flex-direction: column; }
         .panel--matrix { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
         .panel--dashboard { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+        .panel--students { flex: 0 0 auto; display: flex; flex-direction: column; }
 
         .panel__head {
             display: flex;
@@ -938,6 +1011,12 @@ $managerLabel = $currentUser !== null
             background-color: rgba(139, 105, 20, 0.08);
             border: 1px dashed var(--color-accent);
             padding: 3px 8px;
+        }
+
+        .panel__hint--phase {
+            background-color: rgba(37, 99, 235, 0.08);
+            border-color: #2563eb;
+            color: #1d4ed8;
         }
 
         .project-select { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
@@ -1135,8 +1214,6 @@ $managerLabel = $currentUser !== null
             z-index: 1;
             padding: 0.4rem 0.3rem;
         }
-
-        table.matrix tbody tr.is-selected th { background-color: rgba(139, 105, 20, 0.12); box-shadow: inset 3px 0 0 var(--color-accent); }
 
         table.matrix .uni { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
 
@@ -1381,8 +1458,6 @@ $managerLabel = $currentUser !== null
             transform: rotate(45deg);
         }
 
-        body.role-university table.matrix td.clickable { cursor: default; }
-
         .legend {
             margin-top: var(--space-md);
             padding: var(--space-sm) var(--space-md);
@@ -1430,34 +1505,9 @@ $managerLabel = $currentUser !== null
             background: radial-gradient(circle, rgba(139, 105, 20, 0.08) 0%, transparent 70%);
         }
 
-        .kpi-card__label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--color-tertiary);
-            margin-bottom: 8px;
-            position: relative;
-            z-index: 1;
-        }
-
-        .kpi-card__value {
-            font-family: var(--font-serif);
-            font-size: 2.2rem;
-            font-weight: 600;
-            color: var(--color-primary);
-            line-height: 1;
-            margin-bottom: 6px;
-            position: relative;
-            z-index: 1;
-            transition: color 0.2s;
-        }
-
-        .kpi-card__hint {
-            font-size: 0.72rem;
-            color: var(--color-accent-dark);
-            position: relative;
-            z-index: 1;
-        }
+        .kpi-card__label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-tertiary); margin-bottom: 8px; position: relative; z-index: 1; }
+        .kpi-card__value { font-family: var(--font-serif); font-size: 2.2rem; font-weight: 600; color: var(--color-primary); line-height: 1; margin-bottom: 6px; position: relative; z-index: 1; }
+        .kpi-card__hint { font-size: 0.72rem; color: var(--color-accent-dark); position: relative; z-index: 1; }
 
         .dash-toolbar {
             display: flex;
@@ -1469,19 +1519,8 @@ $managerLabel = $currentUser !== null
             border-bottom: 1px solid rgba(26, 26, 26, 0.08);
         }
 
-        .dash-toolbar__group {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .dash-toolbar__label {
-            font-size: 0.68rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--color-tertiary);
-            margin-right: 4px;
-        }
+        .dash-toolbar__group { display: flex; align-items: center; gap: 4px; }
+        .dash-toolbar__label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-tertiary); margin-right: 4px; }
 
         .dash-toolbar__btn {
             padding: 5px 11px;
@@ -1496,12 +1535,7 @@ $managerLabel = $currentUser !== null
         }
 
         .dash-toolbar__btn:hover { background: rgba(139, 105, 20, 0.08); color: var(--color-primary); }
-
-        .dash-toolbar__btn.is-active {
-            background: var(--color-accent);
-            color: #fff;
-            border-color: var(--color-accent);
-        }
+        .dash-toolbar__btn.is-active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
 
         .filter-chip {
             display: inline-flex;
@@ -1516,17 +1550,10 @@ $managerLabel = $currentUser !== null
             cursor: pointer;
             margin-left: auto;
             transition: 0.15s;
-            animation: chip-in 0.25s ease-out;
         }
 
         .filter-chip:hover { background: rgba(139, 105, 20, 0.24); }
         .filter-chip__x { font-size: 0.95rem; line-height: 1; opacity: 0.7; }
-        .filter-chip:hover .filter-chip__x { opacity: 1; }
-
-        @keyframes chip-in {
-            from { opacity: 0; transform: translateX(8px); }
-            to   { opacity: 1; transform: translateX(0); }
-        }
 
         .dash-grid {
             display: grid;
@@ -1544,12 +1571,10 @@ $managerLabel = $currentUser !== null
             flex-direction: column;
             min-height: 260px;
             min-width: 0;
-            transition: box-shadow 0.2s ease-out, border-color 0.2s ease-out;
         }
 
-        .dash-card:hover { border-color: rgba(139, 105, 20, 0.25); }
-
         .dash-card--wide { grid-column: span 2; }
+        .dash-card--map { grid-column: span 3; min-height: 500px; }
 
         .dash-card__title {
             font-family: var(--font-serif);
@@ -1563,15 +1588,8 @@ $managerLabel = $currentUser !== null
 
         .dash-card__hint { font-family: var(--font-sans); font-size: 0.72rem; color: var(--color-tertiary); font-weight: 400; }
 
-        .dash-card__body {
-            flex: 1;
-            min-height: 200px;
-            position: relative;
-        }
-
+        .dash-card__body { flex: 1; min-height: 200px; position: relative; }
         .dash-card canvas { width: 100% !important; height: 100% !important; cursor: pointer; display: block; }
-
-        .dash-card--map { grid-column: span 3; min-height: 500px; }
 
         /* ===== SVG-карта ===== */
         .russia-map-wrap {
@@ -1583,24 +1601,9 @@ $managerLabel = $currentUser !== null
             overflow: hidden;
         }
 
-        .russia-map {
-            width: 100%;
-            height: 100%;
-            display: block;
-        }
-
-        .russia-map .map-grid {
-            stroke: rgba(26, 26, 26, 0.06);
-            stroke-width: 0.6;
-            stroke-dasharray: 2 3;
-        }
-
-        .russia-map .map-grid-label {
-            font-family: var(--font-sans);
-            font-size: 8px;
-            fill: rgba(26, 26, 26, 0.25);
-            letter-spacing: 0.05em;
-        }
+        .russia-map { width: 100%; height: 100%; display: block; }
+        .russia-map .map-grid { stroke: rgba(26, 26, 26, 0.06); stroke-width: 0.6; stroke-dasharray: 2 3; }
+        .russia-map .map-grid-label { font-family: var(--font-sans); font-size: 8px; fill: rgba(26, 26, 26, 0.25); letter-spacing: 0.05em; }
 
         .russia-outline {
             fill: url(#map-fill);
@@ -1609,26 +1612,19 @@ $managerLabel = $currentUser !== null
             stroke-linejoin: round;
             stroke-linecap: round;
             filter: url(#map-glow);
-            transition: fill 0.3s ease-out;
         }
 
         .uni-point { cursor: pointer; transition: opacity 0.25s ease-out; }
         .uni-point.is-dimmed { opacity: 0.15; }
 
-        .uni-point__dot {
-            transition: r 0.25s ease-out, filter 0.25s ease-out, fill 0.3s ease-out;
-            transform-origin: center;
-        }
-
-        .uni-point__halo {
-            transition: opacity 0.3s ease-out, r 0.3s ease-out, fill 0.3s ease-out;
-        }
+        .uni-point__dot { transition: r 0.25s ease-out, filter 0.25s, fill 0.3s; transform-origin: center; }
+        .uni-point__halo { transition: opacity 0.3s, r 0.3s, fill 0.3s; }
 
         .uni-point__pulse {
             fill: none;
             stroke-width: 2;
             opacity: 0;
-            transition: opacity 0.2s, stroke 0.3s ease-out;
+            transition: opacity 0.2s, stroke 0.3s;
             pointer-events: none;
         }
 
@@ -1642,19 +1638,15 @@ $managerLabel = $currentUser !== null
             stroke-width: 3px;
             stroke-linejoin: round;
             pointer-events: none;
-            transition: opacity 0.25s ease-out;
+            transition: opacity 0.25s;
         }
 
         .uni-point.is-dimmed .uni-point__label { opacity: 0.2; }
-
         .uni-point:hover .uni-point__dot { r: 15; filter: brightness(1.1); }
         .uni-point:hover .uni-point__halo { opacity: 0.28; r: 26; }
         .uni-point.is-selected .uni-point__dot { r: 16; stroke-width: 3; }
         .uni-point.is-selected .uni-point__halo { opacity: 0.35; r: 30; }
-        .uni-point.is-selected .uni-point__pulse {
-            opacity: 0.55;
-            animation: pulse-marker 2s ease-out infinite;
-        }
+        .uni-point.is-selected .uni-point__pulse { opacity: 0.55; animation: pulse-marker 2s ease-out infinite; }
 
         @keyframes pulse-marker {
             0%   { r: 16; opacity: 0.55; }
@@ -1675,37 +1667,15 @@ $managerLabel = $currentUser !== null
             color: var(--color-primary);
             opacity: 0;
             transform: translateY(-6px);
-            transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+            transition: opacity 0.2s, transform 0.2s;
             pointer-events: none;
             z-index: 10;
         }
 
-        .map-info.is-visible {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        .map-info__phase {
-            font-size: 0.7rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: var(--color-accent-dark);
-            margin-bottom: 3px;
-        }
-
-        .map-info__name {
-            font-family: var(--font-serif);
-            font-size: 1.05rem;
-            font-weight: 500;
-            line-height: 1.2;
-            margin-bottom: 4px;
-        }
-
-        .map-info__projects {
-            font-size: 0.72rem;
-            color: var(--color-tertiary);
-        }
+        .map-info.is-visible { opacity: 1; transform: translateY(0); }
+        .map-info__phase { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+        .map-info__name { font-family: var(--font-serif); font-size: 1.05rem; font-weight: 500; line-height: 1.2; margin-bottom: 4px; }
+        .map-info__projects { font-size: 0.72rem; color: var(--color-tertiary); }
 
         .map-legend {
             display: flex;
@@ -1725,24 +1695,353 @@ $managerLabel = $currentUser !== null
             cursor: pointer;
             padding: 2px 6px;
             border-radius: 10px;
-            transition: 0.15s;
         }
 
         .map-legend__item:hover { background: rgba(139, 105, 20, 0.1); }
         .map-legend__item.is-active { background: rgba(139, 105, 20, 0.2); font-weight: 600; }
-
         .map-legend__dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.15); }
 
-        @media (max-width: 1100px) {
-            .dash-grid { grid-template-columns: 1fr 1fr; }
-            .dash-card--wide { grid-column: span 2; }
-            .dash-card--map { grid-column: span 2; }
+        /* ===== Статистика студентов (новая секция) ===== */
+        .students-layout {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: var(--space-md);
+            align-items: start;
         }
 
-        @media (max-width: 720px) {
-            .dash-grid { grid-template-columns: 1fr; }
-            .dash-card--wide, .dash-card--map { grid-column: span 1; }
+        @media (max-width: 1100px) {
+            .students-layout { grid-template-columns: 1fr; }
         }
+
+        .students-block {
+            background: var(--color-white);
+        }
+
+        table.students-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.82rem;
+            table-layout: fixed;
+        }
+
+        table.students-table th,
+        table.students-table td {
+            border-right: 1px solid rgba(26, 26, 26, 0.1);
+            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
+            padding: 6px 8px;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        table.students-table thead th {
+            background-color: var(--color-primary);
+            color: #fff;
+            font-weight: 500;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: center;
+            padding: 8px 6px;
+        }
+
+        table.students-table thead th:first-child {
+            text-align: left;
+        }
+
+        table.students-table tbody tr:hover {
+            background-color: rgba(139, 105, 20, 0.04);
+        }
+
+        table.students-table tbody tr.is-selected {
+            background-color: rgba(139, 105, 20, 0.1);
+            box-shadow: inset 3px 0 0 var(--color-accent);
+        }
+
+        table.students-table td.student-name {
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        table.students-table td.student-name .student-sub {
+            display: block;
+            font-weight: 400;
+            font-size: 0.7rem;
+            color: var(--color-tertiary);
+        }
+
+        table.students-table td.student-phase {
+            text-align: center;
+            padding: 4px;
+            width: 90px;
+        }
+
+        .student-sticker {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            min-height: 34px;
+            border-radius: 2px;
+            background: var(--phase-color, #e5e7eb);
+            background-image: linear-gradient(
+                180deg,
+                rgba(255, 255, 255, 0.35) 0%,
+                rgba(0, 0, 0, 0.10) 100%
+            );
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.78rem;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+            box-shadow:
+                0 1px 2px rgba(0, 0, 0, 0.15),
+                0 2px 6px rgba(0, 0, 0, 0.06);
+            transition: transform 0.15s;
+        }
+
+        .student-phase--completed .student-sticker {
+            background-color: var(--phase-color);
+            opacity: 0.55;
+        }
+
+        .student-phase--current .student-sticker {
+            background-color: var(--phase-color);
+            transform: scale(1.05);
+            box-shadow:
+                0 3px 6px rgba(0, 0, 0, 0.2),
+                0 6px 14px rgba(0, 0, 0, 0.1),
+                inset 0 0 0 2px rgba(255, 255, 255, 0.7);
+        }
+
+        .student-phase--future .student-sticker {
+            background-color: transparent;
+            background-image: none;
+            color: rgba(26, 26, 26, 0.18);
+            box-shadow: none;
+            border: 1px dashed rgba(26, 26, 26, 0.15);
+            text-shadow: none;
+            font-weight: 400;
+        }
+
+        .student-phase--future .student-sticker::after {
+            content: '—';
+        }
+
+        .student-phase--future .student-sticker > span {
+            display: none;
+        }
+
+        /* Git-история */
+        .git-history {
+            background: #1a1a1a;
+            border-radius: 3px;
+            padding: 12px 0;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #d4d4d4;
+            line-height: 1.5;
+            overflow: hidden;
+        }
+
+        .git-history__header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 14px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 8px;
+            color: #8b6914;
+            font-weight: 500;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .git-history__branch {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 1px 8px;
+            border-radius: 10px;
+            background: rgba(139, 105, 20, 0.2);
+            color: #d4b35a;
+            font-size: 0.68rem;
+            letter-spacing: 0.02em;
+            text-transform: none;
+        }
+
+        .git-history__list {
+            display: flex;
+            flex-direction: column;
+            padding: 0 4px;
+        }
+
+        .git-history__item {
+            display: grid;
+            grid-template-columns: 12px 70px 1fr;
+            gap: 10px;
+            padding: 5px 10px;
+            border-radius: 2px;
+            transition: background 0.15s;
+            align-items: baseline;
+        }
+
+        .git-history__item:hover { background: rgba(255, 255, 255, 0.04); }
+
+        .git-history__graph {
+            position: relative;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .git-history__graph::before {
+            content: '';
+            position: absolute;
+            top: -5px;
+            bottom: -5px;
+            left: 50%;
+            width: 1px;
+            background: rgba(139, 105, 20, 0.4);
+            margin-left: -0.5px;
+        }
+
+        .git-history__item:first-child .git-history__graph::before { top: 50%; }
+        .git-history__item:last-child .git-history__graph::before { bottom: 50%; }
+
+        .git-history__dot {
+            position: relative;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #8b6914;
+            z-index: 1;
+            box-shadow: 0 0 0 2px #1a1a1a;
+        }
+
+        .git-history__item:first-child .git-history__dot {
+            background: #d4b35a;
+            box-shadow: 0 0 0 2px #1a1a1a, 0 0 8px rgba(212, 179, 90, 0.5);
+        }
+
+        .git-history__hash {
+            color: #8b6914;
+            font-size: 0.7rem;
+            letter-spacing: 0.02em;
+        }
+
+        .git-history__content {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .git-history__msg {
+            color: #e5e5e5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .git-history__meta {
+            color: rgba(255, 255, 255, 0.45);
+            font-size: 0.68rem;
+        }
+
+        /* ===== Студенческий вид ===== */
+        .student-card {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-md);
+        }
+
+        .student-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-md);
+            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
+            border: 1px solid rgba(139, 105, 20, 0.2);
+            border-left: 4px solid var(--color-accent);
+        }
+
+        .student-header__avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--color-accent);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-serif);
+            font-size: 1.5rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .student-header__info { flex: 1; }
+        .student-header__name { font-family: var(--font-serif); font-size: 1.4rem; font-weight: 500; line-height: 1.1; }
+        .student-header__meta { font-size: 0.82rem; color: var(--color-tertiary); margin-top: 4px; }
+        .student-header__topic { font-size: 0.9rem; color: var(--color-accent-dark); margin-top: 6px; font-weight: 500; }
+
+        .student-phases {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        @media (max-width: 900px) {
+            .student-phases { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        .student-phase-step {
+            position: relative;
+            padding: 14px 14px 14px 46px;
+            background: #fff;
+            border: 1px solid rgba(26, 26, 26, 0.12);
+            border-left: 4px solid rgba(26, 26, 26, 0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-height: 96px;
+        }
+
+        .student-phase-step__num {
+            position: absolute;
+            left: 10px;
+            top: 14px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(26, 26, 26, 0.06);
+            color: var(--color-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-serif);
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .student-phase-step__name { font-weight: 500; font-size: 0.9rem; line-height: 1.25; }
+        .student-phase-step__status { margin-top: auto; font-size: 0.72rem; font-weight: 500; padding: 2px 8px; align-self: flex-start; border: 1px solid; border-radius: 2px; }
+
+        .student-phase-step--done { border-left-color: #16a34a; }
+        .student-phase-step--done .student-phase-step__num { background: rgba(22, 163, 74, 0.15); color: #15803d; }
+        .student-phase-step--done .student-phase-step__status { border-color: #16a34a; color: #15803d; }
+
+        .student-phase-step--current { border-left-color: #2563eb; box-shadow: 0 0 0 1px #2563eb inset, 0 4px 12px rgba(37, 99, 235, 0.08); }
+        .student-phase-step--current .student-phase-step__num { background: #2563eb; color: #fff; }
+        .student-phase-step--current .student-phase-step__status { border-color: #2563eb; color: #1d4ed8; }
+
+        .student-phase-step--pending { opacity: 0.7; }
+        .student-phase-step--pending .student-phase-step__status { border-color: rgba(26, 26, 26, 0.2); color: var(--color-tertiary); }
 
         @media (max-width: 900px) { .mainnav { overflow-x: auto; } }
     </style>
@@ -1784,27 +2083,40 @@ $managerLabel = $currentUser !== null
             </div>
             <div class="topbar__user">
                 <div class="role-switch" role="tablist" aria-label="Переключение роли">
-                    <a class="role-switch__btn <?= $viewRole === 'manager' ? 'active' : '' ?>"
-                       role="tab"
-                       aria-selected="<?= $viewRole === 'manager' ? 'true' : 'false' ?>"
-                       href="?role=manager<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
-                        <span class="role-switch__dot"></span>
-                        <?= e($managerLabel) ?> · Менеджер
-                    </a>
-                    <a class="role-switch__btn <?= $viewRole === 'university' ? 'active' : '' ?>"
-                       role="tab"
-                       aria-selected="<?= $viewRole === 'university' ? 'true' : 'false' ?>"
-                       href="?role=university<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
-                        <span class="role-switch__dot"></span>
-                        Представитель Вуза
-                    </a>
-                    <a class="role-switch__btn <?= $viewRole === 'supervisor' ? 'active' : '' ?>"
-                       role="tab"
-                       aria-selected="<?= $viewRole === 'supervisor' ? 'true' : 'false' ?>"
-                       href="?role=supervisor">
-                        <span class="role-switch__dot"></span>
-                        Руководитель · Дашборд
-                    </a>
+                    <!-- Верхняя строка: руководство -->
+                    <div class="role-switch__row">
+                        <a class="role-switch__btn <?= $viewRole === 'supervisor' ? 'active' : '' ?>"
+                           role="tab"
+                           aria-selected="<?= $viewRole === 'supervisor' ? 'true' : 'false' ?>"
+                           href="?role=supervisor">
+                            <span class="role-switch__emoji" aria-hidden="true">🧭</span>
+                            <span class="role-switch__label">Руководитель</span>
+                        </a>
+                        <a class="role-switch__btn <?= $viewRole === 'manager' ? 'active' : '' ?>"
+                           role="tab"
+                           aria-selected="<?= $viewRole === 'manager' ? 'true' : 'false' ?>"
+                           href="?role=manager<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
+                            <span class="role-switch__emoji" aria-hidden="true">📋</span>
+                            <span class="role-switch__label"><?= e($managerLabel) ?> · Менеджер</span>
+                        </a>
+                    </div>
+                    <!-- Нижняя строка: исполнители -->
+                    <div class="role-switch__row">
+                        <a class="role-switch__btn <?= $viewRole === 'university' ? 'active' : '' ?>"
+                           role="tab"
+                           aria-selected="<?= $viewRole === 'university' ? 'true' : 'false' ?>"
+                           href="?role=university<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
+                            <span class="role-switch__emoji" aria-hidden="true">🎓</span>
+                            <span class="role-switch__label">Представитель Вуза</span>
+                        </a>
+                        <a class="role-switch__btn <?= $viewRole === 'student' ? 'active' : '' ?>"
+                           role="tab"
+                           aria-selected="<?= $viewRole === 'student' ? 'true' : 'false' ?>"
+                           href="?role=student<?= $viewStudentId ? '&student_id=' . (int) $viewStudentId : '' ?>">
+                            <span class="role-switch__emoji" aria-hidden="true">🎒</span>
+                            <span class="role-switch__label">Студент</span>
+                        </a>
+                    </div>
                 </div>
                 <a class="topbar__logout" href="index.php?logout=1">Выйти</a>
             </div>
@@ -1845,6 +2157,11 @@ $managerLabel = $currentUser !== null
                                         · <span style="color:#b45309;font-weight:600;">⏳ ожидает подтверждения вуза</span>
                                     <?php endif; ?>
                                 </p>
+                                <?php if ($currentPhaseNum === 11): ?>
+                                    <span class="panel__hint panel__hint--phase">
+                                        👨‍🎓 Проект в фазе «Ведение занятий» — ниже доступна статистика студентов
+                                    </span>
+                                <?php endif; ?>
                             </div>
                         </div>
 
@@ -1871,6 +2188,88 @@ $managerLabel = $currentUser !== null
                             </div>
                         </div>
                     </section>
+
+                    <?php if ($currentPhaseNum === 11): ?>
+                        <!-- ===== Статистика студентов (только в фазе 11) ===== -->
+                        <section class="panel panel--students">
+                            <div class="panel__head">
+                                <div>
+                                    <h2 class="panel__title">Статистика студентов</h2>
+                                    <p class="panel__subtitle">
+                                        Классно-урочная и проектная работа по курсу
+                                        «<?= e($currentProject['title']) ?>»
+                                        · студентов: <?= count($mockStudents) ?>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="students-layout">
+                                <div class="students-block">
+                                    <div style="overflow:auto; border:1px solid rgba(26,26,26,0.1);">
+                                        <table class="students-table">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width: 240px;">Студент</th>
+                                                    <?php foreach ($studentPhases as $sp): ?>
+                                                        <th><?= e($sp['name']) ?></th>
+                                                    <?php endforeach; ?>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($mockStudents as $st): ?>
+                                                    <?php $curPhase = (int) $st['phase']; ?>
+                                                    <tr>
+                                                        <td class="student-name" title="<?= e($st['name']) ?>">
+                                                            <?= e($st['name']) ?>
+                                                            <span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '—' ? ' · ' . e($st['topic']) : '' ?></span>
+                                                        </td>
+                                                        <?php foreach ($studentPhases as $sp): ?>
+                                                            <?php
+                                                            $spNum = (int) $sp['num'];
+                                                            $cls = 'student-phase--future';
+                                                            if ($spNum < $curPhase) $cls = 'student-phase--completed';
+                                                            elseif ($spNum === $curPhase) $cls = 'student-phase--current';
+                                                            ?>
+                                                            <td class="student-phase <?= $cls ?>">
+                                                                <span class="student-sticker"
+                                                                      style="--phase-color: <?= e($sp['color']) ?>;"
+                                                                      title="<?= e($st['name']) ?> · <?= e($sp['name']) ?>">
+                                                                    <span><?= $spNum ?></span>
+                                                                </span>
+                                                            </td>
+                                                        <?php endforeach; ?>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div class="students-block">
+                                    <div class="git-history">
+                                        <div class="git-history__header">
+                                            Git-история проекта
+                                            <span class="git-history__branch">⎇ main</span>
+                                        </div>
+                                        <div class="git-history__list">
+                                            <?php foreach ($mockGitHistory as $commit): ?>
+                                                <div class="git-history__item">
+                                                    <div class="git-history__graph">
+                                                        <span class="git-history__dot"></span>
+                                                    </div>
+                                                    <span class="git-history__hash"><?= e($commit['hash']) ?></span>
+                                                    <div class="git-history__content">
+                                                        <span class="git-history__msg"><?= e($commit['message']) ?></span>
+                                                        <span class="git-history__meta"><?= e($commit['author']) ?> · <?= e($commit['date']) ?></span>
+                                                    </div>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    <?php endif; ?>
 
                     <section class="panel panel--matrix">
                         <div class="panel__head">
@@ -1943,15 +2342,6 @@ $managerLabel = $currentUser !== null
                                                 if ($phase !== null && (int) $phase['num'] > 0) {
                                                     $cellTitle .= ' → ' . $phase['name'];
                                                 }
-                                                if ($interactionId !== null) {
-                                                    if ($isPending) {
-                                                        $cellTitle .= ' · ожидает подтверждения вуза';
-                                                    } else {
-                                                        $cellTitle .= ' · открыть рабочий процесс';
-                                                    }
-                                                } else {
-                                                    $cellTitle .= ' · взаимодействие не начато';
-                                                }
                                                 ?>
                                                 <?php if ($interactionId !== null && $phase !== null && (int) $phase['num'] > 0): ?>
                                                     <td class="<?= e($cellClass) ?>"
@@ -1973,8 +2363,7 @@ $managerLabel = $currentUser !== null
                                                         title="<?= e($cellTitle) ?>"
                                                         data-project="<?= (int) $interactionId ?>"
                                                         tabindex="0"
-                                                        role="link"
-                                                        aria-label="<?= e($cellTitle) ?>">
+                                                        role="link">
                                                         —
                                                     </td>
                                                 <?php else: ?>
@@ -2098,21 +2487,143 @@ $managerLabel = $currentUser !== null
                                 <?php endforeach; ?>
                             <?php endif; ?>
                         </div>
+                    </section>
 
-                        <div class="wf-legend">
-                            <?php foreach ($phases as $phase): ?>
-                                <span class="wf-legend__item">
-                                    <span class="wf-legend__swatch" style="background-color: <?= e($phase['color']) ?>"></span>
-                                    <?php if ((int) $phase['num'] > 0): ?><?= (int) $phase['num'] ?>.<?php endif; ?>
-                                    <?= e($phase['name']) ?>
-                                    <?php if ($phase['requires_confirmation']): ?> 🔒<?php endif; ?>
+                    <!-- ===== Матрица студентов (аналогично менеджеру) ===== -->
+                    <section class="panel panel--students" style="flex:1 1 auto; min-height:0; display:flex; flex-direction:column;">
+                        <div class="panel__head">
+                            <div>
+                                <h2 class="panel__title">Студенты и их проектные фазы</h2>
+                                <p class="panel__subtitle">
+                                    Строки — студенты, столбцы — фазы курсового проекта.
+                                    Клик по студенту — выбрать (как у менеджера).
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style="flex:1; min-height:0; overflow:auto; border:1px solid rgba(26,26,26,0.1);">
+                            <table class="students-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 240px;">Студент</th>
+                                        <?php foreach ($studentPhases as $sp): ?>
+                                            <th><?= (int) $sp['num'] ?>. <?= e($sp['name']) ?></th>
+                                        <?php endforeach; ?>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($mockStudents as $st): ?>
+                                        <?php $curPhase = (int) $st['phase']; ?>
+                                        <tr data-student="<?= (int) $st['id'] ?>" class="clickable-row" style="cursor:pointer;">
+                                            <td class="student-name" title="<?= e($st['name']) ?>">
+                                                <?= e($st['name']) ?>
+                                                <span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '—' ? ' · ' . e($st['topic']) : '' ?></span>
+                                            </td>
+                                            <?php foreach ($studentPhases as $sp): ?>
+                                                <?php
+                                                $spNum = (int) $sp['num'];
+                                                $cls = 'student-phase--future';
+                                                if ($spNum < $curPhase) $cls = 'student-phase--completed';
+                                                elseif ($spNum === $curPhase) $cls = 'student-phase--current';
+                                                ?>
+                                                <td class="student-phase <?= $cls ?>">
+                                                    <span class="student-sticker"
+                                                          style="--phase-color: <?= e($sp['color']) ?>;"
+                                                          title="<?= e($st['name']) ?> · <?= e($sp['name']) ?>">
+                                                        <span><?= $spNum ?></span>
+                                                    </span>
+                                                </td>
+                                            <?php endforeach; ?>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <section class="legend" style="margin-top: var(--space-sm);">
+                            <h3 class="legend__title">Легенда проектных фаз</h3>
+                            <div class="legend__items">
+                                <?php foreach ($studentPhases as $sp): ?>
+                                    <span class="legend__item">
+                                        <span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span>
+                                        <?= (int) $sp['num'] ?>. <?= e($sp['name']) ?>
+                                    </span>
+                                <?php endforeach; ?>
+                                <span class="legend__item">
+                                    <span class="legend__swatch" style="background:transparent; border:1px dashed rgba(26,26,26,0.25)"></span>
+                                    Ещё не начата
                                 </span>
-                            <?php endforeach; ?>
+                            </div>
+                        </section>
+                    </section>
+                </div>
+            <?php elseif ($viewRole === 'student'): ?>
+                <div class="workspace workspace--student">
+                    <section class="panel" style="flex:1; min-height:0; display:flex; flex-direction:column; gap: var(--space-md);">
+                        <div class="student-card">
+
+                            <?php if ($selectedStudent === null): ?>
+                                <div class="uni-empty">Студент не найден.</div>
+                            <?php else: ?>
+                                <div class="student-header">
+                                    <div class="student-header__avatar">
+                                        <?= e(mb_substr($selectedStudent['name'], 0, 1, 'UTF-8')) ?>
+                                    </div>
+                                    <div class="student-header__info">
+                                        <div class="student-header__name"><?= e($selectedStudent['name']) ?></div>
+                                        <div class="student-header__meta">Группа <?= e($selectedStudent['group']) ?> · курс «<?= e($currentProject['title']) ?>»</div>
+                                        <?php if ($selectedStudent['topic'] !== '—'): ?>
+                                            <div class="student-header__topic">Тема проекта: <?= e($selectedStudent['topic']) ?></div>
+                                        <?php else: ?>
+                                            <div class="student-header__topic" style="color:var(--color-tertiary);font-weight:400;">Тема проекта ещё не выбрана</div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+
+                                <div class="student-phases">
+                                    <?php $curPhase = (int) $selectedStudent['phase']; ?>
+                                    <?php foreach ($studentPhases as $sp): ?>
+                                        <?php
+                                        $spNum = (int) $sp['num'];
+                                        $cls = 'student-phase-step--pending';
+                                        $label = 'Ожидает';
+                                        if ($spNum < $curPhase) { $cls = 'student-phase-step--done'; $label = 'Завершён'; }
+                                        elseif ($spNum === $curPhase) { $cls = 'student-phase-step--current'; $label = 'В работе'; }
+                                        ?>
+                                        <div class="student-phase-step <?= $cls ?>">
+                                            <div class="student-phase-step__num"><?= $spNum ?></div>
+                                            <div class="student-phase-step__name"><?= e($sp['name']) ?></div>
+                                            <div class="student-phase-step__status"><?= $label ?></div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+
+                                <div class="git-history">
+                                    <div class="git-history__header">
+                                        Git-история проекта
+                                        <span class="git-history__branch">⎇ main</span>
+                                    </div>
+                                    <div class="git-history__list">
+                                        <?php foreach ($mockGitHistory as $commit): ?>
+                                            <div class="git-history__item">
+                                                <div class="git-history__graph">
+                                                    <span class="git-history__dot"></span>
+                                                </div>
+                                                <span class="git-history__hash"><?= e($commit['hash']) ?></span>
+                                                <div class="git-history__content">
+                                                    <span class="git-history__msg"><?= e($commit['message']) ?></span>
+                                                    <span class="git-history__meta"><?= e($commit['author']) ?> · <?= e($commit['date']) ?></span>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
                         </div>
                     </section>
                 </div>
             <?php else: ?>
-                <!-- ============ ВИД РУКОВОДИТЕЛЯ: ИНТЕРАКТИВНЫЙ ДАШБОРД ============ -->
+                <!-- ============ ВИД РУКОВОДИТЕЛЯ ============ -->
                 <div class="workspace workspace--dash">
                     <section class="panel panel--dashboard">
                         <div class="panel__head">
@@ -2268,45 +2779,7 @@ $managerLabel = $currentUser !== null
                                         </g>
 
                                         <path class="russia-outline"
-                                              d="M 56 250
-                                                 Q 60 220 90 200
-                                                 Q 100 180 85 160
-                                                 Q 90 145 110 155
-                                                 Q 130 165 155 190
-                                                 Q 175 200 200 180
-                                                 Q 230 160 280 130
-                                                 Q 320 115 340 160
-                                                 Q 360 170 380 120
-                                                 Q 420 90 470 70
-                                                 Q 520 50 555 105
-                                                 Q 580 115 615 105
-                                                 Q 660 115 700 130
-                                                 Q 760 140 820 155
-                                                 Q 880 165 940 180
-                                                 Q 985 195 1000 195
-                                                 Q 1000 210 975 220
-                                                 Q 960 235 945 260
-                                                 Q 930 285 900 280
-                                                 Q 875 275 855 320
-                                                 Q 850 350 855 375
-                                                 Q 840 380 830 340
-                                                 Q 810 320 780 300
-                                                 Q 765 300 760 340
-                                                 Q 745 375 720 420
-                                                 Q 705 445 690 440
-                                                 Q 685 410 665 395
-                                                 Q 645 390 600 390
-                                                 Q 540 390 470 390
-                                                 Q 430 400 405 400
-                                                 Q 375 395 350 370
-                                                 Q 330 355 305 365
-                                                 Q 275 375 245 400
-                                                 Q 215 425 185 445
-                                                 Q 155 465 130 470
-                                                 Q 105 465 90 440
-                                                 Q 82 415 80 390
-                                                 Q 75 355 65 320
-                                                 Q 56 295 56 250 Z"/>
+                                              d="M 56 250 Q 60 220 90 200 Q 100 180 85 160 Q 90 145 110 155 Q 130 165 155 190 Q 175 200 200 180 Q 230 160 280 130 Q 320 115 340 160 Q 360 170 380 120 Q 420 90 470 70 Q 520 50 555 105 Q 580 115 615 105 Q 660 115 700 130 Q 760 140 820 155 Q 880 165 940 180 Q 985 195 1000 195 Q 1000 210 975 220 Q 960 235 945 260 Q 930 285 900 280 Q 875 275 855 320 Q 850 350 855 375 Q 840 380 830 340 Q 810 320 780 300 Q 765 300 760 340 Q 745 375 720 420 Q 705 445 690 440 Q 685 410 665 395 Q 645 390 600 390 Q 540 390 470 390 Q 430 400 405 400 Q 375 395 350 370 Q 330 355 305 365 Q 275 375 245 400 Q 215 425 185 445 Q 155 465 130 470 Q 105 465 90 440 Q 82 415 80 390 Q 75 355 65 320 Q 56 295 56 250 Z"/>
 
                                         <rect width="<?= (int) $mapViewWidth ?>" height="<?= (int) $mapViewHeight ?>"
                                               fill="url(#map-vignette)" pointer-events="none"/>
@@ -2321,9 +2794,7 @@ $managerLabel = $currentUser !== null
                                                 <g class="uni-point"
                                                    data-uni-id="<?= (int) $p['id'] ?>"
                                                    data-name="<?= e($p['short']) ?>"
-                                                   data-full="<?= e($p['name']) ?>"
-                                                   data-x="<?= (float) $p['x'] ?>"
-                                                   data-y="<?= (float) $p['y'] ?>">
+                                                   data-full="<?= e($p['name']) ?>">
                                                     <circle class="uni-point__pulse" r="16"
                                                             stroke="<?= e($p['color']) ?>"
                                                             cx="<?= (float) $p['x'] ?>"
@@ -2518,6 +2989,21 @@ $managerLabel = $currentUser !== null
     </script>
     <?php endif; ?>
 
+    <?php if ($viewRole === 'university' && $currentUser !== null): ?>
+    <script>
+    (function () {
+        'use strict';
+        var rows = document.querySelectorAll('table.students-table tbody tr[data-student]');
+        rows.forEach(function (tr) {
+            tr.addEventListener('click', function () {
+                rows.forEach(function (r) { r.classList.remove('is-selected'); });
+                tr.classList.add('is-selected');
+            });
+        });
+    })();
+    </script>
+    <?php endif; ?>
+
     <?php if ($viewRole === 'supervisor' && $currentUser !== null): ?>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
@@ -2535,60 +3021,32 @@ $managerLabel = $currentUser !== null
         Chart.defaults.font.size = 11;
         Chart.defaults.color = textColor;
 
-        var state = {
-            months: 12,
-            chartType: 'line',   // 'line' | 'bar' | 'area'
-            phaseId: null,
-            uniId: null,
-            aggregate: null
-        };
-
-        var charts = {
-            activity: null,
-            phases: null,
-            unis: null,
-            stacked: null
-        };
+        var state = { months: 12, chartType: 'line', phaseId: null, uniId: null, aggregate: null };
+        var charts = { activity: null, phases: null, unis: null, stacked: null };
 
         function phaseById(id) {
-            for (var i = 0; i < DASH.phases.length; i++) {
-                if (DASH.phases[i].id === id) return DASH.phases[i];
-            }
+            for (var i = 0; i < DASH.phases.length; i++) if (DASH.phases[i].id === id) return DASH.phases[i];
             return null;
         }
-
         function uniById(id) {
-            for (var i = 0; i < DASH.universities.length; i++) {
-                if (DASH.universities[i].id === id) return DASH.universities[i];
-            }
+            for (var i = 0; i < DASH.universities.length; i++) if (DASH.universities[i].id === id) return DASH.universities[i];
             return null;
         }
-
         function anyUniById(id) {
-            for (var i = 0; i < DASH.allUniversities.length; i++) {
-                if (DASH.allUniversities[i].id === id) return DASH.allUniversities[i];
-            }
+            for (var i = 0; i < DASH.allUniversities.length; i++) if (DASH.allUniversities[i].id === id) return DASH.allUniversities[i];
             return null;
         }
-
         function hexWithAlpha(hex, alpha) {
             if (!hex || hex.charAt(0) !== '#') return hex;
             var h = hex.substring(1);
-            if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-            var r = parseInt(h.substring(0, 2), 16);
-            var g = parseInt(h.substring(2, 4), 16);
-            var b = parseInt(h.substring(4, 6), 16);
+            if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+            var r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
             return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
         }
 
-        // ===== Агрегация по выбранному периоду =====
         function aggregateMonths(n) {
             var slice = DASH.monthly.slice(-n);
-            var byUniPhase = {};
-            var labels = [];
-            var activity = [];
-            var newProjects = [];
-
+            var byUniPhase = {}, labels = [], activity = [], newProjects = [];
             slice.forEach(function (m, idx) {
                 labels.push(m.label);
                 var monthTotal = 0;
@@ -2603,19 +3061,12 @@ $managerLabel = $currentUser !== null
                 activity.push(monthTotal);
                 newProjects.push(DASH.newProjects[DASH.newProjects.length - n + idx] || 1);
             });
-
-            return {
-                labels: labels,
-                activity: activity,
-                newProjects: newProjects,
-                byUniPhase: byUniPhase
-            };
+            return { labels: labels, activity: activity, newProjects: newProjects, byUniPhase: byUniPhase };
         }
 
         function computeByPhase() {
             var res = {};
             DASH.phases.forEach(function (p) { res[p.id] = 0; });
-
             Object.keys(state.aggregate.byUniPhase).forEach(function (uid) {
                 if (state.uniId && parseInt(uid, 10) !== state.uniId) return;
                 var u = state.aggregate.byUniPhase[uid];
@@ -2630,7 +3081,6 @@ $managerLabel = $currentUser !== null
         function computeByUni() {
             var res = {};
             DASH.universities.forEach(function (u) { res[u.id] = 0; });
-
             Object.keys(state.aggregate.byUniPhase).forEach(function (uidStr) {
                 var uid = parseInt(uidStr, 10);
                 var u = state.aggregate.byUniPhase[uidStr];
@@ -2646,77 +3096,47 @@ $managerLabel = $currentUser !== null
         function topPhaseForUni(uid) {
             var u = state.aggregate.byUniPhase[String(uid)];
             if (!u) return null;
-            var maxCount = 0;
-            var maxPid = null;
+            var maxCount = 0, maxPid = null;
             Object.keys(u).forEach(function (pidStr) {
-                if (u[pidStr] > maxCount) {
-                    maxCount = u[pidStr];
-                    maxPid = parseInt(pidStr, 10);
-                }
+                if (u[pidStr] > maxCount) { maxCount = u[pidStr]; maxPid = parseInt(pidStr, 10); }
             });
             return maxPid;
         }
 
-        function phaseColorById(pid) {
-            var p = phaseById(pid);
-            return p ? p.color : '#9ca3af';
-        }
+        function phaseColorById(pid) { var p = phaseById(pid); return p ? p.color : '#9ca3af'; }
+        function rebuildAggregate() { state.aggregate = aggregateMonths(state.months); }
 
-        function rebuildAggregate() {
-            state.aggregate = aggregateMonths(state.months);
-        }
-
-        // ===== График активности =====
         function renderActivity() {
             var canvas = document.getElementById('chart-activity');
             if (!canvas) return;
-
-            if (charts.activity) {
-                charts.activity.destroy();
-                charts.activity = null;
-            }
+            if (charts.activity) { charts.activity.destroy(); charts.activity = null; }
 
             var labels = state.aggregate.labels;
             var actData = state.aggregate.activity;
             var newData = state.aggregate.newProjects;
-
             var gradient = canvas.getContext('2d').createLinearGradient(0, 0, 0, 260);
             gradient.addColorStop(0, 'rgba(139, 105, 20, 0.4)');
             gradient.addColorStop(1, 'rgba(139, 105, 20, 0.02)');
-
             var type = state.chartType === 'bar' ? 'bar' : 'line';
             var fill = state.chartType === 'area';
 
             var datasets = [
                 {
-                    label: 'Активность',
-                    data: actData,
+                    label: 'Активность', data: actData,
                     borderColor: accent,
                     backgroundColor: type === 'bar' ? accent : (fill ? gradient : 'rgba(139, 105, 20, 0.08)'),
-                    fill: fill || type === 'bar',
-                    tension: 0.35,
-                    pointBackgroundColor: accent,
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                    pointRadius: type === 'bar' ? 0 : 4,
-                    pointHoverRadius: type === 'bar' ? 0 : 7,
-                    borderWidth: 2,
-                    borderRadius: type === 'bar' ? 3 : 0,
-                    barPercentage: 0.6
+                    fill: fill || type === 'bar', tension: 0.35,
+                    pointBackgroundColor: accent, pointBorderColor: '#fff', pointBorderWidth: 2,
+                    pointRadius: type === 'bar' ? 0 : 4, pointHoverRadius: type === 'bar' ? 0 : 7,
+                    borderWidth: 2, borderRadius: type === 'bar' ? 3 : 0, barPercentage: 0.6
                 },
                 {
-                    label: 'Новые проекты',
-                    data: newData,
-                    borderColor: accentDark,
-                    backgroundColor: 'transparent',
-                    borderDash: type === 'bar' ? [] : [4, 4],
-                    tension: 0.35,
+                    label: 'Новые проекты', data: newData,
+                    borderColor: accentDark, backgroundColor: 'transparent',
+                    borderDash: type === 'bar' ? [] : [4,4], tension: 0.35,
                     pointBackgroundColor: accentDark,
-                    pointRadius: type === 'bar' ? 0 : 3,
-                    pointHoverRadius: 5,
-                    borderWidth: 1.5,
-                    type: 'line',
-                    hidden: type === 'bar'
+                    pointRadius: type === 'bar' ? 0 : 3, pointHoverRadius: 5,
+                    borderWidth: 1.5, type: 'line', hidden: type === 'bar'
                 }
             ];
 
@@ -2724,19 +3144,12 @@ $managerLabel = $currentUser !== null
                 type: type,
                 data: { labels: labels, datasets: datasets },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
                     animation: { duration: 500, easing: 'easeOutQuart' },
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { position: 'bottom', labels: { boxWidth: 12, padding: 14, font: { size: 11 } } },
-                        tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
-                            padding: 10,
-                            cornerRadius: 2,
-                            titleFont: { size: 12, weight: '600' },
-                            bodyFont: { size: 12 }
-                        }
+                        tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2 }
                     },
                     scales: {
                         x: { grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor } },
@@ -2746,15 +3159,10 @@ $managerLabel = $currentUser !== null
             });
         }
 
-        // ===== Распределение по фазам =====
         function renderPhases() {
             var canvas = document.getElementById('chart-phases');
             if (!canvas) return;
-
-            if (charts.phases) {
-                charts.phases.destroy();
-                charts.phases = null;
-            }
+            if (charts.phases) { charts.phases.destroy(); charts.phases = null; }
 
             var byPhase = computeByPhase();
             var labels = DASH.phases.map(function (p) { return p.num + '. ' + p.name; });
@@ -2772,55 +3180,37 @@ $managerLabel = $currentUser !== null
                     datasets: [{
                         data: data,
                         backgroundColor: colors.map(function (c, i) { return hexWithAlpha(c, alphas[i]); }),
-                        borderColor: '#fff',
-                        borderWidth: 2,
-                        hoverOffset: 8
+                        borderColor: '#fff', borderWidth: 2, hoverOffset: 8
                     }]
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    cutout: '60%',
+                    responsive: true, maintainAspectRatio: false, cutout: '60%',
                     animation: { duration: 500, easing: 'easeOutQuart' },
                     onClick: function (evt, els) {
                         if (!els || !els.length) return;
-                        var idx = els[0].index;
-                        var pid = DASH.phases[idx].id;
+                        var pid = DASH.phases[els[0].index].id;
                         state.phaseId = (state.phaseId === pid) ? null : pid;
                         refreshAll();
                     },
                     plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: { boxWidth: 10, boxHeight: 10, padding: 8, font: { size: 10 } }
-                        },
+                        legend: { position: 'right', labels: { boxWidth: 10, boxHeight: 10, padding: 8, font: { size: 10 } } },
                         tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
-                            padding: 10,
-                            cornerRadius: 2,
-                            callbacks: {
-                                label: function (ctx) { return ctx.label + ': ' + ctx.parsed + ' проектов'; }
-                            }
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2,
+                            callbacks: { label: function (ctx) { return ctx.label + ': ' + ctx.parsed + ' проектов'; } }
                         }
                     }
                 }
             });
         }
 
-        // ===== Топ вузов (bar / line / area) =====
         function renderUnis() {
             var canvas = document.getElementById('chart-universities');
             if (!canvas) return;
-
-            if (charts.unis) {
-                charts.unis.destroy();
-                charts.unis = null;
-            }
+            if (charts.unis) { charts.unis.destroy(); charts.unis = null; }
 
             var byUni = computeByUni();
             var labels = DASH.universities.map(function (u) { return u.short; });
             var data = DASH.universities.map(function (u) { return byUni[u.id] || 0; });
-
             var bgs = DASH.universities.map(function (u) {
                 if (state.uniId && u.id !== state.uniId) return hexWithAlpha(accent, 0.22);
                 return accent;
@@ -2832,38 +3222,28 @@ $managerLabel = $currentUser !== null
 
             var type = state.chartType === 'bar' ? 'bar' : 'line';
             var fill = state.chartType === 'area';
-
-            var dataset;
-            var options;
+            var dataset, options;
 
             if (type === 'bar') {
                 dataset = {
-                    label: 'Проектов',
-                    data: data,
-                    backgroundColor: bgs,
-                    hoverBackgroundColor: hoverBgs,
-                    borderRadius: 3,
-                    barThickness: 16
+                    label: 'Проектов', data: data,
+                    backgroundColor: bgs, hoverBackgroundColor: hoverBgs,
+                    borderRadius: 3, barThickness: 16
                 };
-
                 options = {
                     indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
                     animation: { duration: 500, easing: 'easeOutQuart' },
                     onClick: function (evt, els) {
                         if (!els || !els.length) return;
-                        var idx = els[0].index;
-                        var uid = DASH.universities[idx].id;
+                        var uid = DASH.universities[els[0].index].id;
                         state.uniId = (state.uniId === uid) ? null : uid;
                         refreshAll();
                     },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
-                            padding: 10,
-                            cornerRadius: 2,
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2,
                             callbacks: {
                                 label: function (ctx) {
                                     var v = ctx.parsed && ctx.parsed.x !== undefined ? ctx.parsed.x : ctx.parsed;
@@ -2879,37 +3259,26 @@ $managerLabel = $currentUser !== null
                 };
             } else {
                 dataset = {
-                    label: 'Проектов',
-                    data: data,
+                    label: 'Проектов', data: data,
                     borderColor: accent,
                     backgroundColor: fill ? hexWithAlpha(accent, 0.35) : hexWithAlpha(accent, 0.1),
-                    fill: fill,
-                    tension: 0.35,
-                    pointBackgroundColor: accent,
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                    pointRadius: 5,
-                    pointHoverRadius: 8,
-                    borderWidth: 2
+                    fill: fill, tension: 0.35,
+                    pointBackgroundColor: accent, pointBorderColor: '#fff', pointBorderWidth: 2,
+                    pointRadius: 5, pointHoverRadius: 8, borderWidth: 2
                 };
-
                 options = {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
                     animation: { duration: 500, easing: 'easeOutQuart' },
                     onClick: function (evt, els) {
                         if (!els || !els.length) return;
-                        var idx = els[0].index;
-                        var uid = DASH.universities[idx].id;
+                        var uid = DASH.universities[els[0].index].id;
                         state.uniId = (state.uniId === uid) ? null : uid;
                         refreshAll();
                     },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
-                            padding: 10,
-                            cornerRadius: 2,
+                            backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2,
                             callbacks: {
                                 label: function (ctx) {
                                     var v = ctx.parsed && ctx.parsed.y !== undefined ? ctx.parsed.y : ctx.parsed;
@@ -2925,29 +3294,19 @@ $managerLabel = $currentUser !== null
                 };
             }
 
-            charts.unis = new Chart(canvas, {
-                type: type,
-                data: { labels: labels, datasets: [dataset] },
-                options: options
-            });
+            charts.unis = new Chart(canvas, { type: type, data: { labels: labels, datasets: [dataset] }, options: options });
         }
 
-        // ===== Фазы по вузам =====
         function renderStacked() {
             var canvas = document.getElementById('chart-directions');
             if (!canvas) return;
-
-            if (charts.stacked) {
-                charts.stacked.destroy();
-                charts.stacked = null;
-            }
+            if (charts.stacked) { charts.stacked.destroy(); charts.stacked = null; }
 
             var byUniPhase = state.aggregate.byUniPhase;
             var uniLabels = DASH.universities.map(function (u) { return u.short; });
             var phaseIds = DASH.phases.map(function (p) { return p.id; });
             var phaseLabels = DASH.phases.map(function (p) { return p.num + '. ' + p.name; });
             var phaseColors = DASH.phases.map(function (p) { return p.color; });
-
             var type = state.chartType === 'bar' ? 'bar' : 'line';
             var fill = state.chartType === 'area';
 
@@ -2960,21 +3319,13 @@ $managerLabel = $currentUser !== null
                     var uData = byUniPhase[String(u.id)];
                     return uData ? (uData[String(pid)] || 0) : 0;
                 });
-
                 var alpha = isDimmed ? 0.22 : 1;
                 var ds = {
-                    label: phaseLabels[i],
-                    data: data,
-                    borderColor: phaseColors[i],
-                    borderWidth: 2,
-                    tension: 0.35,
-                    pointBackgroundColor: phaseColors[i],
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 1.5,
-                    pointRadius: type === 'bar' ? 0 : 4,
-                    pointHoverRadius: 6
+                    label: phaseLabels[i], data: data,
+                    borderColor: phaseColors[i], borderWidth: 2, tension: 0.35,
+                    pointBackgroundColor: phaseColors[i], pointBorderColor: '#fff', pointBorderWidth: 1.5,
+                    pointRadius: type === 'bar' ? 0 : 4, pointHoverRadius: 6
                 };
-
                 if (type === 'bar') {
                     ds.backgroundColor = hexWithAlpha(phaseColors[i], alpha * 0.9);
                     ds.borderRadius = 2;
@@ -2983,7 +3334,6 @@ $managerLabel = $currentUser !== null
                     ds.backgroundColor = fill ? hexWithAlpha(phaseColors[i], alpha * 0.35) : 'transparent';
                     ds.fill = fill;
                 }
-
                 datasets.push(ds);
             }
 
@@ -2991,16 +3341,11 @@ $managerLabel = $currentUser !== null
                 type: type,
                 data: { labels: uniLabels, datasets: datasets },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
                     animation: { duration: 500, easing: 'easeOutQuart' },
                     plugins: {
                         legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, padding: 10, font: { size: 10 } } },
-                        tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)',
-                            padding: 10,
-                            cornerRadius: 2
-                        }
+                        tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2 }
                     },
                     scales: {
                         x: { stacked: type === 'bar', grid: { display: false }, ticks: { color: textColor } },
@@ -3010,33 +3355,23 @@ $managerLabel = $currentUser !== null
             });
         }
 
-        // ===== Карта =====
         function renderMap() {
             var mapWrap = document.querySelector('.russia-map-wrap');
             if (!mapWrap) return;
-
             var points = mapWrap.querySelectorAll('.uni-point');
-
             points.forEach(function (g) {
                 var uid = parseInt(g.dataset.uniId, 10);
                 g.classList.remove('is-dimmed', 'is-selected');
-
                 var topPid = topPhaseForUni(uid);
                 var color = topPid ? phaseColorById(topPid) : '#9ca3af';
-
                 var dot = g.querySelector('.uni-point__dot');
                 var halo = g.querySelector('.uni-point__halo');
                 var pulse = g.querySelector('.uni-point__pulse');
                 if (dot) dot.setAttribute('fill', color);
                 if (halo) halo.setAttribute('fill', color);
                 if (pulse) pulse.setAttribute('stroke', color);
-
                 var hasData = state.aggregate.byUniPhase[String(uid)] !== undefined;
-
-                if (state.uniId && uid === state.uniId) {
-                    g.classList.add('is-selected');
-                    return;
-                }
+                if (state.uniId && uid === state.uniId) { g.classList.add('is-selected'); return; }
                 if (state.phaseId) {
                     var uData = state.aggregate.byUniPhase[String(uid)];
                     var inPhase = uData && uData[String(state.phaseId)];
@@ -3047,117 +3382,69 @@ $managerLabel = $currentUser !== null
                     g.classList.add('is-dimmed');
                 }
             });
-
-            var legendItems = document.querySelectorAll('.map-legend__item');
-            legendItems.forEach(function (li) {
+            document.querySelectorAll('.map-legend__item').forEach(function (li) {
                 var pid = parseInt(li.dataset.phaseId, 10);
                 li.classList.toggle('is-active', state.phaseId === pid);
             });
         }
 
-        // ===== Подсказки =====
         function updateChip() {
             var chip = document.getElementById('filter-chip');
             var label = document.getElementById('filter-chip-label');
             if (!chip || !label) return;
-
             var parts = [];
-            if (state.uniId) {
-                var u = uniById(state.uniId) || anyUniById(state.uniId);
-                if (u) parts.push('Вуз: ' + u.short);
-            }
-            if (state.phaseId) {
-                var p = phaseById(state.phaseId);
-                if (p) parts.push('Фаза: ' + p.num + '. ' + p.name);
-            }
-
-            if (parts.length === 0) {
-                chip.style.display = 'none';
-            } else {
-                chip.style.display = 'inline-flex';
-                label.textContent = parts.join('  ·  ');
-            }
+            if (state.uniId) { var u = uniById(state.uniId) || anyUniById(state.uniId); if (u) parts.push('Вуз: ' + u.short); }
+            if (state.phaseId) { var p = phaseById(state.phaseId); if (p) parts.push('Фаза: ' + p.num + '. ' + p.name); }
+            if (parts.length === 0) chip.style.display = 'none';
+            else { chip.style.display = 'inline-flex'; label.textContent = parts.join('  ·  '); }
         }
 
         function updateHints() {
-            var typeLabel = state.chartType === 'line' ? 'линия'
-                : (state.chartType === 'bar' ? 'столбцы' : 'область');
-
-            var hAct = document.getElementById('hint-activity');
-            if (hAct) hAct.textContent = 'последние ' + state.months + ' мес · ' + typeLabel;
-
-            var hPh = document.getElementById('hint-phases');
-            if (hPh) hPh.textContent = 'за ' + state.months + ' мес · клик — фильтр';
-
-            var hUn = document.getElementById('hint-unis');
-            if (hUn) hUn.textContent = 'за ' + state.months + ' мес · ' + typeLabel + ' · клик — фильтр';
-
-            var hSt = document.getElementById('hint-stacked');
-            if (hSt) hSt.textContent = 'за ' + state.months + ' мес · ' + typeLabel;
-
-            var hMap = document.getElementById('hint-map');
-            if (hMap) hMap.textContent = 'за ' + state.months + ' мес · цвет — преобладающая фаза';
+            var tl = state.chartType === 'line' ? 'линия' : (state.chartType === 'bar' ? 'столбцы' : 'область');
+            var el;
+            if ((el = document.getElementById('hint-activity'))) el.textContent = 'последние ' + state.months + ' мес · ' + tl;
+            if ((el = document.getElementById('hint-phases'))) el.textContent = 'за ' + state.months + ' мес · клик — фильтр';
+            if ((el = document.getElementById('hint-unis'))) el.textContent = 'за ' + state.months + ' мес · ' + tl + ' · клик — фильтр';
+            if ((el = document.getElementById('hint-stacked'))) el.textContent = 'за ' + state.months + ' мес · ' + tl;
+            if ((el = document.getElementById('hint-map'))) el.textContent = 'за ' + state.months + ' мес · цвет — преобладающая фаза';
         }
 
         function refreshAll() {
             rebuildAggregate();
-            renderPhases();
-            renderUnis();
-            renderStacked();
-            renderMap();
-            updateChip();
-            updateHints();
+            renderPhases(); renderUnis(); renderStacked(); renderMap();
+            updateChip(); updateHints();
         }
 
-        // ===== Первичная отрисовка =====
         rebuildAggregate();
-        renderActivity();
-        renderPhases();
-        renderUnis();
-        renderStacked();
-        renderMap();
-        updateChip();
-        updateHints();
+        renderActivity(); renderPhases(); renderUnis(); renderStacked(); renderMap();
+        updateChip(); updateHints();
 
-        // ===== Тулбар: период =====
         var monthBtns = document.querySelectorAll('[data-months]');
         monthBtns.forEach(function (btn) {
             btn.addEventListener('click', function () {
                 monthBtns.forEach(function (b) { b.classList.remove('is-active'); });
                 btn.classList.add('is-active');
                 state.months = parseInt(btn.dataset.months, 10);
-                refreshAll();
-                renderActivity();
+                refreshAll(); renderActivity();
             });
         });
 
-        // ===== Тулбар: тип графика =====
         var typeBtns = document.querySelectorAll('[data-act-type]');
         typeBtns.forEach(function (btn) {
             btn.addEventListener('click', function () {
                 typeBtns.forEach(function (b) { b.classList.remove('is-active'); });
                 btn.classList.add('is-active');
                 state.chartType = btn.dataset.actType;
-                renderActivity();
-                renderUnis();
-                renderStacked();
-                updateHints();
+                renderActivity(); renderUnis(); renderStacked(); updateHints();
             });
         });
 
-        // ===== Сброс фильтров =====
         var chip = document.getElementById('filter-chip');
-        if (chip) {
-            chip.addEventListener('click', function () {
-                state.phaseId = null;
-                state.uniId = null;
-                refreshAll();
-            });
-        }
+        if (chip) chip.addEventListener('click', function () {
+            state.phaseId = null; state.uniId = null; refreshAll();
+        });
 
-        // ===== Легенда карты =====
-        var legendItems = document.querySelectorAll('.map-legend__item');
-        legendItems.forEach(function (li) {
+        document.querySelectorAll('.map-legend__item').forEach(function (li) {
             li.addEventListener('click', function () {
                 var pid = parseInt(li.dataset.phaseId, 10);
                 state.phaseId = (state.phaseId === pid) ? null : pid;
@@ -3165,44 +3452,30 @@ $managerLabel = $currentUser !== null
             });
         });
 
-        // ===== Точки на карте =====
         var mapWrap = document.querySelector('.russia-map-wrap');
         var mapInfo = document.getElementById('map-info');
-
         if (mapWrap && mapInfo) {
             var infoPhase    = document.getElementById('map-info-phase');
             var infoName     = document.getElementById('map-info-name');
             var infoProjects = document.getElementById('map-info-projects');
-
-            var points = mapWrap.querySelectorAll('.uni-point');
-
-            points.forEach(function (g) {
+            mapWrap.querySelectorAll('.uni-point').forEach(function (g) {
                 var uid = parseInt(g.dataset.uniId, 10);
-                var fullName = g.dataset.full || '';
-                var short = g.dataset.name || '';
-
                 g.addEventListener('mouseenter', function () {
                     var topPid = topPhaseForUni(uid);
                     var topPhase = topPid ? phaseById(topPid) : null;
                     var phaseName = topPhase ? (topPhase.num + '. ' + topPhase.name) : 'Не начато';
                     var color = topPhase ? topPhase.color : '#8b6914';
-
                     var uData = state.aggregate.byUniPhase[String(uid)] || {};
                     var total = 0;
                     Object.keys(uData).forEach(function (k) { total += uData[k]; });
-
                     infoPhase.textContent = phaseName;
                     infoPhase.style.color = color;
-                    infoName.textContent = short;
-                    infoName.title = fullName;
+                    infoName.textContent = g.dataset.name || '';
+                    infoName.title = g.dataset.full || '';
                     infoProjects.textContent = 'Проектов за период: ' + total + ' · клик — фильтр';
                     mapInfo.classList.add('is-visible');
                 });
-
-                g.addEventListener('mouseleave', function () {
-                    mapInfo.classList.remove('is-visible');
-                });
-
+                g.addEventListener('mouseleave', function () { mapInfo.classList.remove('is-visible'); });
                 g.addEventListener('click', function () {
                     state.uniId = (state.uniId === uid) ? null : uid;
                     refreshAll();
