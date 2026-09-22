@@ -2,14 +2,15 @@
 /**
  * Точка входа CRM «ИТ Школа РТК» (прототип).
  *
- * Роли (4):
+ * Роли (5):
  *   - supervisor: сводный дашборд;
  *   - manager: рабочий процесс + сетка проектов + «Статистика студентов»
- *     при фазе «Ведение занятий» (11);
- *   - university: рабочие процессы вуза + вкладки «Проект» (история фаз
- *     студентов с возможными возвратами) и «Журнал» (классическая
- *     классно-урочная система: даты в столбцах, оценки/·/н в ячейках);
- *   - student: карточка своего проекта с этапами и git-историей.
+ *     при фазе «Ведение занятий» (11) с активностью родителей;
+ *   - university: рабочие процессы вуза + вкладки «Проект» и «Журнал»
+ *     + заметки преподавателя + активность родителей;
+ *   - student: карточка своего проекта с этапами и git-историей;
+ *   - parent: журнал и проектные фазы только своего ребёнка,
+ *     уведомления о плохих отметках, история визитов.
  */
 
 session_start();
@@ -17,10 +18,6 @@ session_start();
 require __DIR__ . '/db.php';
 
 $pdo = db();
-
-// =============================================================================
-// AJAX / POST actions
-// =============================================================================
 
 $action = $_GET['action'] ?? '';
 
@@ -31,7 +28,6 @@ function phase_requires_confirmation(int $num): bool
 
 if ($action === 'move_phase' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
-
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $projectId     = (int) ($input['project_id'] ?? 0);
     $targetPhaseId = (int) ($input['target_phase_id'] ?? 0);
@@ -39,20 +35,12 @@ if ($action === 'move_phase' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt = $pdo->prepare('SELECT * FROM interactions WHERE id = :id');
     $stmt->execute([':id' => $projectId]);
     $interaction = $stmt->fetch();
-
-    if (!$interaction) {
-        echo json_encode(['ok' => false, 'error' => 'Проект не найден']);
-        exit;
-    }
+    if (!$interaction) { echo json_encode(['ok' => false, 'error' => 'Проект не найден']); exit; }
 
     $stmt = $pdo->prepare('SELECT * FROM interaction_phases WHERE id = :id');
     $stmt->execute([':id' => $targetPhaseId]);
     $targetPhase = $stmt->fetch();
-
-    if (!$targetPhase) {
-        echo json_encode(['ok' => false, 'error' => 'Фаза не найдена']);
-        exit;
-    }
+    if (!$targetPhase) { echo json_encode(['ok' => false, 'error' => 'Фаза не найдена']); exit; }
 
     $currentPhaseId = $interaction['phase_id'] !== null ? (int) $interaction['phase_id'] : 0;
     $currentPhase = null;
@@ -88,7 +76,6 @@ if ($action === 'move_phase' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $stmt = $pdo->prepare('UPDATE interactions SET phase_id = :pid WHERE id = :id');
         $stmt->execute([':pid' => $targetPhaseId, ':id' => $projectId]);
-
         unset($_SESSION['pending_phase_change']);
         $_SESSION['university_notification'] = [
             'type'       => 'phase_changed',
@@ -103,11 +90,9 @@ if ($action === 'move_phase' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if (($action === 'confirm_phase' || $action === 'reject_phase') && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!empty($_SESSION['pending_phase_change'])) {
         $pending = $_SESSION['pending_phase_change'];
-
         if ($action === 'confirm_phase') {
             $stmt = $pdo->prepare('UPDATE interactions SET phase_id = :pid WHERE id = :id');
             $stmt->execute([':pid' => $pending['target_phase_id'], ':id' => $pending['project_id']]);
-
             $_SESSION['manager_notification'] = [
                 'type'       => 'confirmed',
                 'message'    => 'Вуз подтвердил перевод в фазу «' . $pending['target_phase_name'] . '».',
@@ -120,17 +105,12 @@ if (($action === 'confirm_phase' || $action === 'reject_phase') && $_SERVER['REQ
                 'created_at' => time(),
             ];
         }
-
         unset($_SESSION['pending_phase_change']);
         unset($_SESSION['university_notification']);
     }
     header('Location: index.php?role=university');
     exit;
 }
-
-// =============================================================================
-// Обычный поток
-// =============================================================================
 
 $error = '';
 
@@ -143,21 +123,18 @@ if (isset($_GET['logout'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === '') {
     $login    = trim($_POST['login'] ?? '');
     $password = $_POST['password'] ?? '';
-
     if ($login === '' || $password === '') {
         $error = 'Укажите логин и пароль.';
     } else {
         $stmt = $pdo->prepare('SELECT * FROM users WHERE login = :login AND is_active = 1');
         $stmt->execute([':login' => $login]);
         $user = $stmt->fetch();
-
         if ($user && password_verify($password, $user['password'])) {
             session_regenerate_id(true);
             $_SESSION['user_id'] = (int) $user['id'];
             header('Location: index.php');
             exit;
         }
-
         $error = 'Неверный логин или пароль.';
     }
 }
@@ -209,10 +186,7 @@ if (isset($_SESSION['user_id'])) {
     );
     $stmt->execute([':id' => $_SESSION['user_id']]);
     $currentUser = $stmt->fetch();
-
-    if ($currentUser === false) {
-        $currentUser = null;
-    }
+    if ($currentUser === false) $currentUser = null;
 }
 
 function e(string $value): string
@@ -254,30 +228,18 @@ $productShortNames = [
 function uni_initial(string $name): string
 {
     $name = ltrim($name);
-    if ($name === '') {
-        return '?';
-    }
-
+    if ($name === '') return '?';
     $byte = ord($name[0]);
-    if ($byte < 0x80) {
-        $len = 1;
-    } elseif ($byte < 0xF0) {
-        $len = $byte < 0xE0 ? 2 : 3;
-    } else {
-        $len = 4;
-    }
-
+    if ($byte < 0x80) $len = 1;
+    elseif ($byte < 0xF0) $len = $byte < 0xE0 ? 2 : 3;
+    else $len = 4;
     $first = substr($name, 0, $len);
-
     if ($len > 1) {
         $last = $len - 1;
         $tail = ord($first[$last]);
-        if ($tail >= 0xB0 && $tail <= 0xDF) {
-            $first[$last] = chr($tail - 0x20);
-        }
+        if ($tail >= 0xB0 && $tail <= 0xDF) $first[$last] = chr($tail - 0x20);
         return $first;
     }
-
     return strtoupper($first);
 }
 
@@ -293,8 +255,6 @@ foreach ($products as &$product) {
     $product['short'] = $productShortNames[$product['name']] ?? $product['name'];
 }
 unset($product);
-
-// ===== Рабочий процесс =====================================================
 
 $workflowSteps = [
     ['num' => 1,  'name' => 'Поиск контактов ответственного в вузе',   'side' => 'internal'],
@@ -323,13 +283,9 @@ $projectOptions = $pdo->query(
 )->fetchAll();
 
 $shortByUniversityId = [];
-foreach ($universities as $university) {
-    $shortByUniversityId[(int) $university['id']] = $university['short'];
-}
+foreach ($universities as $university) $shortByUniversityId[(int) $university['id']] = $university['short'];
 $shortByProductId = [];
-foreach ($products as $product) {
-    $shortByProductId[(int) $product['id']] = $product['short'];
-}
+foreach ($products as $product) $shortByProductId[(int) $product['id']] = $product['short'];
 
 foreach ($projectOptions as &$opt) {
     $opt['title'] = $opt['university_name'] . ' · ' . $opt['product_name'];
@@ -337,28 +293,19 @@ foreach ($projectOptions as &$opt) {
         ($shortByUniversityId[(int) $opt['university_id']] ?? $opt['university_name'])
         . ' · ' . ($shortByProductId[(int) $opt['product_id']] ?? $opt['product_name']);
     $opt['phase_num'] = ($opt['phase_id'] !== null && isset($phaseById[(int) $opt['phase_id']]))
-        ? (int) $phaseById[(int) $opt['phase_id']]['num']
-        : 0;
-    $opt['phase'] = ($opt['phase_id'] !== null)
-        ? ($phaseById[(int) $opt['phase_id']] ?? null)
-        : null;
+        ? (int) $phaseById[(int) $opt['phase_id']]['num'] : 0;
+    $opt['phase'] = ($opt['phase_id'] !== null) ? ($phaseById[(int) $opt['phase_id']] ?? null) : null;
 }
 unset($opt);
 
 $currentProjectId = 0;
 foreach ($projectOptions as $opt) {
-    if ((int) $opt['id'] === (int) ($_GET['project'] ?? 0)) {
-        $currentProjectId = (int) $opt['id'];
-        break;
-    }
+    if ((int) $opt['id'] === (int) ($_GET['project'] ?? 0)) { $currentProjectId = (int) $opt['id']; break; }
 }
-if ($currentProjectId === 0 && $projectOptions !== []) {
-    $currentProjectId = (int) $projectOptions[0]['id'];
-}
+if ($currentProjectId === 0 && $projectOptions !== []) $currentProjectId = (int) $projectOptions[0]['id'];
 
 $currentProject = ['id' => $currentProjectId, 'title' => 'нет активных проектов', 'short' => '—', 'phase' => null];
 $currentPhaseNum = 0;
-
 foreach ($projectOptions as $opt) {
     if ((int) $opt['id'] === $currentProjectId) {
         $currentProject['title'] = $opt['university_name'] . ' · ' . $opt['product_name'];
@@ -371,9 +318,7 @@ foreach ($projectOptions as $opt) {
 
 $pendingChange = $_SESSION['pending_phase_change'] ?? null;
 $pendingByProject = [];
-if ($pendingChange !== null) {
-    $pendingByProject[(int) $pendingChange['project_id']] = $pendingChange;
-}
+if ($pendingChange !== null) $pendingByProject[(int) $pendingChange['project_id']] = $pendingChange;
 
 $stepStates = [
     'completed'        => ['label' => 'Завершён',        'color' => '#16a34a', 'fill' => 100],
@@ -393,25 +338,15 @@ $sideLabels = [
 ];
 
 function build_project_workflow(
-    array $workflowSteps,
-    array $sideLabels,
-    array $stepStates,
-    array $currentStates,
-    int $phaseNum,
-    int $projectId
+    array $workflowSteps, array $sideLabels, array $stepStates, array $currentStates,
+    int $phaseNum, int $projectId
 ): array {
     $currentState = $currentStates[$projectId % count($currentStates)];
     $workflow = [];
-
     foreach ($workflowSteps as $step) {
-        if ($step['num'] < $phaseNum) {
-            $state = 'completed';
-        } elseif ($step['num'] === $phaseNum) {
-            $state = $currentState;
-        } else {
-            $state = 'pending';
-        }
-
+        if ($step['num'] < $phaseNum) $state = 'completed';
+        elseif ($step['num'] === $phaseNum) $state = $currentState;
+        else $state = 'pending';
         $workflow[] = [
             'num'        => $step['num'],
             'name'       => $step['name'],
@@ -424,37 +359,21 @@ function build_project_workflow(
             'isCurrent'  => $step['num'] === $phaseNum,
         ];
     }
-
     return $workflow;
 }
 
-$workflow = build_project_workflow(
-    $workflowSteps,
-    $sideLabels,
-    $stepStates,
-    $currentStates,
-    $currentPhaseNum,
-    $currentProjectId
-);
+$workflow = build_project_workflow($workflowSteps, $sideLabels, $stepStates, $currentStates, $currentPhaseNum, $currentProjectId);
 
-// =============================================================================
-// Студенческие проектные фазы
-// =============================================================================
-// Выбор темы → Работа над проектом → Предварительная защита → Защита проекта
-
+// Студенческие фазы
 $studentPhases = [
     ['code' => 'topic',   'num' => 1, 'name' => 'Выбор темы',             'color' => '#8b6914'],
     ['code' => 'work',    'num' => 2, 'name' => 'Работа над проектом',     'color' => '#2563eb'],
     ['code' => 'predef',  'num' => 3, 'name' => 'Предварительная защита',  'color' => '#d97706'],
     ['code' => 'defense', 'num' => 4, 'name' => 'Защита проекта',          'color' => '#16a34a'],
 ];
-
 $studentPhaseByNum = [];
-foreach ($studentPhases as $sp) {
-    $studentPhaseByNum[(int) $sp['num']] = $sp;
-}
+foreach ($studentPhases as $sp) $studentPhaseByNum[(int) $sp['num']] = $sp;
 
-// Mock-студенты курса (демо)
 $mockStudents = [
     ['id' => 1, 'name' => 'Иванов Иван Иванович',       'group' => 'ИУ7-41Б',  'topic' => 'ML-модель для телекома'],
     ['id' => 2, 'name' => 'Петрова Анна Сергеевна',     'group' => 'ИУ7-41Б',  'topic' => 'Аналитика оттока клиентов'],
@@ -468,7 +387,6 @@ $mockStudents = [
     ['id' => 10,'name' => 'Романова Елизавета Олеговна','group' => 'ИУ7-45Б',  'topic' => 'Оптимизация маршрутизации'],
 ];
 
-// История проектных фаз каждого студента (с возможными возвратами).
 $mockStudentHistories = [
     1 => [
         ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: ML-модель для телекома'],
@@ -496,9 +414,7 @@ $mockStudentHistories = [
         ['num' => 3, 'date' => '05.10', 'note' => 'Предзащита повторно'],
         ['num' => 4, 'date' => '12.10', 'note' => 'Защита проекта'],
     ],
-    5 => [
-        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы'],
-    ],
+    5 => [['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы']],
     6 => [
         ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Дашборд качества'],
         ['num' => 2, 'date' => '09.09', 'note' => 'Прототип дашборда'],
@@ -518,9 +434,7 @@ $mockStudentHistories = [
         ['num' => 2, 'date' => '12.09', 'note' => 'Сбор датасета'],
         ['num' => 3, 'date' => '26.09', 'note' => 'Предзащита — принято'],
     ],
-    9 => [
-        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Сегментация'],
-    ],
+    9 => [['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Сегментация']],
     10 => [
         ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Оптимизация маршрутизации'],
         ['num' => 2, 'date' => '12.09', 'note' => 'Начало работы'],
@@ -529,7 +443,6 @@ $mockStudentHistories = [
     ],
 ];
 
-// Git-история (демо, для роли студента и менеджера)
 $mockGitHistory = [
     ['hash' => 'a3f9c12', 'date' => '20.09 14:23', 'author' => 'Иванов И.И.',      'message' => 'Добавлен раздел «Введение»'],
     ['hash' => 'b7e2a45', 'date' => '19.09 18:07', 'author' => 'Иванов И.И.',      'message' => 'Постановка задачи и цели работы'],
@@ -538,10 +451,7 @@ $mockGitHistory = [
     ['hash' => 'e45a3c7', 'date' => '18.09 12:00', 'author' => 'ИТ Школа РТК',     'message' => 'Создание шаблона курсового проекта'],
 ];
 
-// =============================================================================
-// Журнал (классическая классно-урочная система)
-// =============================================================================
-
+// ===== Журнал =====
 $journalDates = ['03.09', '05.09', '10.09', '12.09', '17.09', '19.09', '24.09', '26.09', '01.10', '03.10'];
 
 $journalLessons = [
@@ -557,7 +467,6 @@ $journalLessons = [
     9 => ['topic' => 'Семинар: разбор проектов',           'homework' => 'Подготовить отчёт по проекту'],
 ];
 
-// Оценки: '5','4','3','2' — оценка; '·' — присутствовал без оценки; 'н' — отсутствовал
 $journalMarks = [
     1  => ['5', '·', '4', '·', '5', '·', '4', 'н', '5', '·'],
     2  => ['·', '5', '·', '5', '4', '·', '5', '5', '·', '4'],
@@ -571,18 +480,66 @@ $journalMarks = [
     10 => ['4', '5', '·', '5', '5', '4', '5', '5', '·', '5'],
 ];
 
-// =============================================================================
-// Данные для дашборда руководителя
-// =============================================================================
+$journalNotes = [
+    1  => [1 => 'Просил разобрать подробнее линейную регрессию', 8 => 'Сильно вырос, хвалить'],
+    3  => [4 => 'Не был по уважительной причине, отработает',     5 => 'Отвечал на семинаре'],
+    5  => [2 => 'Похвалить за активность',                        3 => 'Пропуск — предупредил заранее'],
+    7  => [5 => 'Нужна помощь с бустингом, назначить консультацию'],
+    8  => [7 => 'Спросить, почему не сдал задание'],
+];
 
+// ===== Активность родителей (mock + фактическая для текущей сессии) =====
+$parentVisitsMock = [
+    1  => ['count' => 14, 'last' => '20.09', 'trend' => '+3', 'unread_bad' => 0],
+    2  => ['count' => 8,  'last' => '18.09', 'trend' => '+1', 'unread_bad' => 0],
+    3  => ['count' => 19, 'last' => '21.09', 'trend' => '+5', 'unread_bad' => 1],
+    4  => ['count' => 6,  'last' => '15.09', 'trend' => '-2', 'unread_bad' => 1],
+    5  => ['count' => 3,  'last' => '10.09', 'trend' => '0',  'unread_bad' => 2],
+    6  => ['count' => 11, 'last' => '19.09', 'trend' => '+2', 'unread_bad' => 0],
+    7  => ['count' => 16, 'last' => '20.09', 'trend' => '+4', 'unread_bad' => 0],
+    8  => ['count' => 4,  'last' => '12.09', 'trend' => '-1', 'unread_bad' => 2],
+    9  => ['count' => 2,  'last' => '06.09', 'trend' => '0',  'unread_bad' => 1],
+    10 => ['count' => 13, 'last' => '21.09', 'trend' => '+3', 'unread_bad' => 0],
+];
+
+// Для родителя: выбор ребёнка
+$viewParentChildId = (int) ($_GET['child_id'] ?? 0);
+if ($viewParentChildId === 0 && $mockStudents !== []) $viewParentChildId = (int) $mockStudents[0]['id'];
+$parentChild = null;
+foreach ($mockStudents as $s) {
+    if ((int) $s['id'] === $viewParentChildId) { $parentChild = $s; break; }
+}
+
+// Учёт визитов родителя в текущей сессии (для демо)
+if (!isset($_SESSION['parent_visits'])) $_SESSION['parent_visits'] = [];
+$todayKey = date('Y-m-d');
+if (($_GET['role'] ?? '') === 'parent' && $parentChild !== null) {
+    $cid = (int) $parentChild['id'];
+    if (!isset($_SESSION['parent_visits'][$cid])) $_SESSION['parent_visits'][$cid] = [];
+    $_SESSION['parent_visits'][$cid][$todayKey] = ($_SESSION['parent_visits'][$cid][$todayKey] ?? 0) + 1;
+}
+
+// Плохие отметки ребёнка (2 и 3) — для баннера уведомлений
+$parentBadMarks = [];
+if ($parentChild !== null) {
+    $cid = (int) $parentChild['id'];
+    $marks = $journalMarks[$cid] ?? [];
+    foreach ($marks as $i => $m) {
+        if ($m === '2' || $m === '3') {
+            $parentBadMarks[] = [
+                'date'  => $journalDates[$i] ?? '',
+                'mark'  => $m,
+                'topic' => $journalLessons[$i]['topic'] ?? '',
+            ];
+        }
+    }
+}
+
+// ===== Дашборд =====
 $dashPhaseCounts = [];
-foreach ($phases as $p) {
-    $dashPhaseCounts[(int) $p['id']] = 0;
-}
+foreach ($phases as $p) $dashPhaseCounts[(int) $p['id']] = 0;
 $dashUniCounts = [];
-foreach ($universities as $u) {
-    $dashUniCounts[(int) $u['id']] = 0;
-}
+foreach ($universities as $u) $dashUniCounts[(int) $u['id']] = 0;
 $dashUniMaxPhaseNum = [];
 $dashUniPhaseCount = [];
 $totalInteractions = 0;
@@ -593,60 +550,37 @@ foreach ($interactions as $row) {
     $totalInteractions++;
     $pid = $row['phase_id'] !== null ? (int) $row['phase_id'] : 0;
     $uid = (int) $row['university_id'];
-
-    if ($pid > 0 && isset($dashPhaseCounts[$pid])) {
-        $dashPhaseCounts[$pid]++;
-    }
-    if (isset($dashUniCounts[$uid])) {
-        $dashUniCounts[$uid]++;
-    }
-
+    if ($pid > 0 && isset($dashPhaseCounts[$pid])) $dashPhaseCounts[$pid]++;
+    if (isset($dashUniCounts[$uid])) $dashUniCounts[$uid]++;
     $num = ($pid > 0 && isset($phaseById[$pid])) ? (int) $phaseById[$pid]['num'] : 0;
     $sumPhase += $num;
-    if ($num > 0 && $num < 14) {
-        $activeInteractions++;
-    }
-
-    if (!isset($dashUniMaxPhaseNum[$uid]) || $num > $dashUniMaxPhaseNum[$uid]) {
-        $dashUniMaxPhaseNum[$uid] = $num;
-    }
-
+    if ($num > 0 && $num < 14) $activeInteractions++;
+    if (!isset($dashUniMaxPhaseNum[$uid]) || $num > $dashUniMaxPhaseNum[$uid]) $dashUniMaxPhaseNum[$uid] = $num;
     if ($pid > 0) {
-        if (!isset($dashUniPhaseCount[$uid])) {
-            $dashUniPhaseCount[$uid] = [];
-        }
+        if (!isset($dashUniPhaseCount[$uid])) $dashUniPhaseCount[$uid] = [];
         $dashUniPhaseCount[$uid][$pid] = ($dashUniPhaseCount[$uid][$pid] ?? 0) + 1;
     }
 }
 
 $avgPhase = $totalInteractions > 0 ? round($sumPhase / $totalInteractions, 1) : 0;
-
 $chartPhases = array_values(array_filter($phases, function ($p) { return (int) $p['num'] > 0; }));
 
 $topUniversities = [];
 foreach ($universities as $u) {
     $uid = (int) $u['id'];
-    $topUniversities[] = [
-        'id'    => $uid,
-        'short' => $u['short'],
-        'full'  => $u['name'],
-        'count' => $dashUniCounts[$uid] ?? 0,
-    ];
+    $topUniversities[] = ['id' => $uid, 'short' => $u['short'], 'full' => $u['name'], 'count' => $dashUniCounts[$uid] ?? 0];
 }
 usort($topUniversities, function ($a, $b) { return $b['count'] - $a['count']; });
 $topUniversities = array_slice($topUniversities, 0, 8);
 
 $monthsRu = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 $nowMonth = (int) date('n');
-
 $chartNewProjectsByMonth = [];
 $monthly = [];
-
 for ($i = 11; $i >= 0; $i--) {
     $m = $nowMonth - $i;
-    while ($m <= 0) { $m += 12; }
+    while ($m <= 0) $m += 12;
     $seed = ($i + 3) * 41;
-
     $byUniPhase = [];
     foreach ($universities as $u) {
         $uid = (int) $u['id'];
@@ -656,18 +590,11 @@ for ($i = 11; $i >= 0; $i--) {
             $base = ($seed * 7 + $uid * 11 + $pid * 13) % 4;
             $recency = (12 - $i);
             $val = $base + (int) ($recency / 4);
-            if ($val > 0) {
-                $byUniPhase[(string) $uid][(string) $pid] = $val;
-            }
+            if ($val > 0) $byUniPhase[(string) $uid][(string) $pid] = $val;
         }
     }
-
     $chartNewProjectsByMonth[] = 1 + ($seed % 4);
-
-    $monthly[] = [
-        'label'      => $monthsRu[$m - 1],
-        'byUniPhase' => $byUniPhase,
-    ];
+    $monthly[] = ['label' => $monthsRu[$m - 1], 'byUniPhase' => $byUniPhase];
 }
 
 $mapViewWidth  = 1000;
@@ -682,41 +609,22 @@ function project_point(float $lat, float $lng, int $w, int $h, float $lngMin, fl
 }
 
 $universityCoords = [
-    1  => [55.7906, 49.1221],
-    2  => [55.9297, 37.5213],
-    3  => [55.6497, 37.6642],
-    4  => [59.8822, 29.8258],
-    5  => [54.8473, 83.0930],
-    6  => [56.8439, 60.6526],
-    7  => [47.2225, 39.7188],
-    8  => [43.1155, 131.8855],
-    9  => [56.4653, 84.9508],
-    10 => [55.8337, 49.1254],
+    1  => [55.7906, 49.1221], 2  => [55.9297, 37.5213], 3  => [55.6497, 37.6642],
+    4  => [59.8822, 29.8258], 5  => [54.8473, 83.0930], 6  => [56.8439, 60.6526],
+    7  => [47.2225, 39.7188], 8  => [43.1155, 131.8855], 9 => [56.4653, 84.9508], 10 => [55.8337, 49.1254],
 ];
 
 $mapPoints = [];
 foreach ($universities as $u) {
     $uid = (int) $u['id'];
     if (!isset($universityCoords[$uid])) continue;
-
     $maxNum   = $dashUniMaxPhaseNum[$uid] ?? 0;
     $maxPhase = $maxNum > 0 ? ($phaseByNum[$maxNum] ?? null) : null;
     $color    = $maxPhase !== null ? $maxPhase['color'] : '#9ca3af';
-
-    [$sx, $sy] = project_point(
-        $universityCoords[$uid][0],
-        $universityCoords[$uid][1],
-        $mapViewWidth, $mapViewHeight,
-        $lngMin, $lngMax, $latMin, $latMax
-    );
-
+    [$sx, $sy] = project_point($universityCoords[$uid][0], $universityCoords[$uid][1], $mapViewWidth, $mapViewHeight, $lngMin, $lngMax, $latMin, $latMax);
     $mapPoints[] = [
-        'id'       => $uid,
-        'name'     => $u['name'],
-        'short'    => $u['short'],
-        'x'        => $sx,
-        'y'        => $sy,
-        'color'    => $color,
+        'id'       => $uid, 'name' => $u['name'], 'short' => $u['short'],
+        'x'        => $sx, 'y' => $sy, 'color' => $color,
         'phase'    => $maxPhase !== null ? $maxPhase['name'] : 'Не начато',
         'projects' => $dashUniCounts[$uid] ?? 0,
     ];
@@ -724,100 +632,55 @@ foreach ($universities as $u) {
 
 $dashPayload = [
     'phases' => array_map(function ($p) {
-        return [
-            'id'    => (int) $p['id'],
-            'num'   => (int) $p['num'],
-            'name'  => $p['name'],
-            'color' => $p['color'],
-        ];
+        return ['id' => (int) $p['id'], 'num' => (int) $p['num'], 'name' => $p['name'], 'color' => $p['color']];
     }, $chartPhases),
     'universities' => array_map(function ($u) {
-        return [
-            'id'    => $u['id'],
-            'short' => $u['short'],
-            'name'  => $u['full'],
-        ];
+        return ['id' => $u['id'], 'short' => $u['short'], 'name' => $u['full']];
     }, $topUniversities),
     'allUniversities' => array_map(function ($u) {
-        return [
-            'id'    => (int) $u['id'],
-            'short' => $u['short'],
-            'name'  => $u['name'],
-        ];
+        return ['id' => (int) $u['id'], 'short' => $u['short'], 'name' => $u['name']];
     }, $universities),
     'mapPoints'   => $mapPoints,
     'monthly'     => $monthly,
     'newProjects' => $chartNewProjectsByMonth,
 ];
 
-// ===== Переключатель ролей ==================================================
-
+// ===== Переключатель ролей =====
 $viewRole = $_GET['role'] ?? 'manager';
-if (!in_array($viewRole, ['manager', 'university', 'supervisor', 'student'], true)) {
+if (!in_array($viewRole, ['manager', 'university', 'supervisor', 'student', 'parent'], true)) {
     $viewRole = 'manager';
 }
 
 $viewUniId = (int) ($_GET['uni_id'] ?? 0);
-if ($viewRole === 'university' && $viewUniId === 0 && $universities !== []) {
-    $viewUniId = (int) $universities[0]['id'];
-}
+if ($viewRole === 'university' && $viewUniId === 0 && $universities !== []) $viewUniId = (int) $universities[0]['id'];
 
 $selectedUni = null;
 foreach ($universities as $u) {
-    if ((int) $u['id'] === $viewUniId) {
-        $selectedUni = $u;
-        break;
-    }
+    if ((int) $u['id'] === $viewUniId) { $selectedUni = $u; break; }
 }
 
 $uniProjects = [];
 if ($viewRole === 'university') {
     foreach ($projectOptions as $opt) {
         if ((int) $opt['university_id'] === $viewUniId) {
-            $opt['workflow'] = build_project_workflow(
-                $workflowSteps,
-                $sideLabels,
-                $stepStates,
-                $currentStates,
-                (int) $opt['phase_num'],
-                (int) $opt['id']
-            );
+            $opt['workflow'] = build_project_workflow($workflowSteps, $sideLabels, $stepStates, $currentStates, (int) $opt['phase_num'], (int) $opt['id']);
             $uniProjects[] = $opt;
         }
     }
 }
 
 $universityNotification = $_SESSION['university_notification'] ?? null;
-
 $managerNotification = $_SESSION['manager_notification'] ?? null;
-if ($managerNotification !== null) {
-    unset($_SESSION['manager_notification']);
-}
+if ($managerNotification !== null) unset($_SESSION['manager_notification']);
 
-$managerLabel = $currentUser !== null
-    ? ($currentUser['full_name'] ?: $currentUser['login'])
-    : 'Павел';
+$managerLabel = $currentUser !== null ? ($currentUser['full_name'] ?: $currentUser['login']) : 'Павел';
 
-// Для роли «Студент»
 $viewStudentId = (int) ($_GET['student_id'] ?? 0);
-if ($viewRole === 'student' && $viewStudentId === 0 && $mockStudents !== []) {
-    $viewStudentId = (int) $mockStudents[0]['id'];
-}
+if ($viewRole === 'student' && $viewStudentId === 0 && $mockStudents !== []) $viewStudentId = (int) $mockStudents[0]['id'];
 $selectedStudent = null;
 foreach ($mockStudents as $s) {
-    if ((int) $s['id'] === $viewStudentId) {
-        $selectedStudent = $s;
-        break;
-    }
+    if ((int) $s['id'] === $viewStudentId) { $selectedStudent = $s; break; }
 }
-
-// Текущая фаза студента = последний элемент его истории
-$studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): array {
-    if (empty($mockStudentHistories[$studentId])) {
-        return ['num' => 0, 'note' => '', 'date' => ''];
-    }
-    return end($mockStudentHistories[$studentId]);
-};
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -861,207 +724,96 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         }
 
         h1, h2, h3 { font-family: var(--font-serif); font-weight: 500; line-height: 1.2; }
-
         a { color: var(--color-primary); text-decoration: none; transition: var(--transition-base); }
         a:hover { color: var(--color-accent); }
 
-        .auth-body {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background-color: var(--color-light);
-            padding: var(--space-lg);
-        }
-
-        .auth-card {
-            background-color: var(--color-white);
-            border: 1px solid rgba(26, 26, 26, 0.1);
-            padding: var(--space-xl);
-            width: 100%;
-            max-width: 420px;
-        }
-
+        .auth-body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background-color: var(--color-light); padding: var(--space-lg); }
+        .auth-card { background-color: var(--color-white); border: 1px solid rgba(26, 26, 26, 0.1); padding: var(--space-xl); width: 100%; max-width: 420px; }
         .auth-card__brand { font-size: 2rem; font-weight: 600; text-align: center; margin-bottom: var(--space-xs); }
         .auth-card__subtitle { font-size: 0.9rem; color: var(--color-accent); text-align: center; margin-bottom: var(--space-lg); font-weight: 500; }
-
         .auth-form label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: var(--space-xs); color: var(--color-secondary); }
 
         .auth-form input[type="text"],
         .auth-form input[type="password"],
         .auth-form select {
-            width: 100%;
-            padding: 0.75rem var(--space-sm);
+            width: 100%; padding: 0.75rem var(--space-sm);
             border: 1px solid rgba(26, 26, 26, 0.15);
-            background-color: var(--color-white);
-            color: var(--color-primary);
-            font-family: var(--font-sans);
-            font-size: 0.95rem;
-            margin-bottom: var(--space-md);
-            transition: var(--transition-base);
+            background-color: var(--color-white); color: var(--color-primary);
+            font-family: var(--font-sans); font-size: 0.95rem;
+            margin-bottom: var(--space-md); transition: var(--transition-base);
         }
-
         .auth-form input:focus, .auth-form select:focus { outline: none; border-color: var(--color-accent); }
-
         .auth-form button {
-            width: 100%;
-            padding: var(--space-sm);
-            background-color: var(--color-accent);
-            color: var(--color-white);
-            border: none;
-            font-family: var(--font-sans);
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: var(--transition-base);
+            width: 100%; padding: var(--space-sm);
+            background-color: var(--color-accent); color: var(--color-white);
+            border: none; font-family: var(--font-sans); font-size: 1rem; font-weight: 500;
+            cursor: pointer; transition: var(--transition-base);
         }
-
         .auth-form button:hover { background-color: var(--color-accent-light); }
-
-        .auth-error {
-            background-color: #fdf3f2;
-            color: #9b2c1f;
-            border-left: 2px solid #9b2c1f;
-            padding: 0.75rem var(--space-sm);
-            font-size: 0.85rem;
-            margin-bottom: var(--space-md);
-        }
+        .auth-error { background-color: #fdf3f2; color: #9b2c1f; border-left: 2px solid #9b2c1f; padding: 0.75rem var(--space-sm); font-size: 0.85rem; margin-bottom: var(--space-md); }
 
         .dashboard { display: flex; flex-direction: column; min-height: 100vh; }
 
         .topbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: var(--space-sm);
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: var(--space-sm);
             padding: var(--space-md) var(--space-lg);
-            background-color: var(--color-white);
-            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
+            background-color: var(--color-white); border-bottom: 1px solid rgba(26, 26, 26, 0.1);
         }
-
         .topbar__title { font-family: var(--font-serif); font-size: 1.5rem; font-weight: 600; }
-        .topbar__title span {
-            color: var(--color-accent);
-            font-size: 0.85rem;
-            font-family: var(--font-sans);
-            font-weight: 400;
-            display: block;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-
+        .topbar__title span { color: var(--color-accent); font-size: 0.85rem; font-family: var(--font-sans); font-weight: 400; display: block; letter-spacing: 0.08em; text-transform: uppercase; }
         .topbar__user { display: flex; align-items: center; gap: var(--space-sm); font-size: 0.9rem; }
 
-        /* ===== Переключатель ролей: 2 строки ===== */
-        .role-switch {
-            display: inline-flex;
-            flex-direction: column;
-            border: 1px solid rgba(26, 26, 26, 0.18);
-            background-color: var(--color-white);
-            border-radius: 2px;
-            overflow: hidden;
-        }
-
+        .role-switch { display: inline-flex; flex-direction: column; border: 1px solid rgba(26, 26, 26, 0.18); background-color: var(--color-white); border-radius: 2px; overflow: hidden; }
         .role-switch__row { display: flex; }
         .role-switch__row + .role-switch__row { border-top: 1px solid rgba(26, 26, 26, 0.18); }
 
         .role-switch__btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.5rem 0.9rem;
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: var(--color-secondary);
-            background-color: var(--color-white);
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.5rem 0.9rem; font-size: 0.8rem; font-weight: 500;
+            color: var(--color-secondary); background-color: var(--color-white);
             border-right: 1px solid rgba(26, 26, 26, 0.18);
-            transition: var(--transition-base);
-            white-space: nowrap;
-            flex: 1;
-            justify-content: flex-start;
+            transition: var(--transition-base); white-space: nowrap;
+            flex: 1; justify-content: flex-start;
         }
-
         .role-switch__btn:last-child { border-right: none; }
         .role-switch__btn:hover { background-color: rgba(139, 105, 20, 0.08); color: var(--color-primary); }
         .role-switch__btn.active { background-color: var(--color-accent); color: var(--color-white); }
         .role-switch__btn.active:hover { color: var(--color-white); }
-
         .role-switch__emoji { font-size: 1rem; line-height: 1; flex-shrink: 0; filter: saturate(0.9); }
         .role-switch__label { white-space: nowrap; }
 
         .topbar__logout {
             padding: 0.5rem var(--space-md);
             border: 1px solid rgba(26, 26, 26, 0.2);
-            font-size: 0.85rem;
-            transition: var(--transition-base);
+            font-size: 0.85rem; transition: var(--transition-base);
         }
         .topbar__logout:hover { border-color: var(--color-accent); background-color: rgba(139, 105, 20, 0.05); }
 
-        .mainnav {
-            display: flex;
-            align-items: center;
-            gap: var(--space-xs);
-            padding: 0 var(--space-lg);
-            background-color: var(--color-light);
-            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
-        }
-
-        .mainnav__caption {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--color-tertiary);
-            margin-right: var(--space-sm);
-        }
-
-        .mainnav a {
-            display: block;
-            padding: 0.65rem var(--space-sm);
-            font-size: 0.9rem;
-            border-bottom: 2px solid transparent;
-        }
-
-        .mainnav a:hover, .mainnav a.active {
-            background-color: rgba(139, 105, 20, 0.1);
-            border-bottom-color: var(--color-accent);
-            color: var(--color-primary);
-        }
+        .mainnav { display: flex; align-items: center; gap: var(--space-xs); padding: 0 var(--space-lg); background-color: var(--color-light); border-bottom: 1px solid rgba(26, 26, 26, 0.1); }
+        .mainnav__caption { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-tertiary); margin-right: var(--space-sm); }
+        .mainnav a { display: block; padding: 0.65rem var(--space-sm); font-size: 0.9rem; border-bottom: 2px solid transparent; }
+        .mainnav a:hover, .mainnav a.active { background-color: rgba(139, 105, 20, 0.1); border-bottom-color: var(--color-accent); color: var(--color-primary); }
 
         .content { flex: 1; min-height: 0; padding: var(--space-lg); }
 
         .notification {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: var(--space-md);
-            padding: 12px 16px;
-            margin-bottom: var(--space-md);
-            border-left: 4px solid;
-            font-size: 0.9rem;
-            line-height: 1.4;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: var(--space-md); padding: 12px 16px; margin-bottom: var(--space-md);
+            border-left: 4px solid; font-size: 0.9rem; line-height: 1.4;
         }
-
         .notification--pending { background-color: #fffbeb; border-color: #d97706; color: #78350f; }
         .notification--info    { background-color: #eff6ff; border-color: #2563eb; color: #1e3a8a; }
         .notification--success { background-color: #f0fdf4; border-color: #16a34a; color: #14532d; }
         .notification--danger  { background-color: #fef2f2; border-color: #dc2626; color: #7f1d1d; }
-
         .notification__icon { font-size: 1.2rem; flex-shrink: 0; }
         .notification__body { flex: 1; }
         .notification__actions { display: flex; gap: 8px; flex-shrink: 0; }
-
         .notification__btn {
-            padding: 6px 14px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            border: 1px solid currentColor;
-            background: transparent;
-            cursor: pointer;
-            font-family: var(--font-sans);
-            transition: var(--transition-base);
+            padding: 6px 14px; font-size: 0.8rem; font-weight: 500;
+            border: 1px solid currentColor; background: transparent;
+            cursor: pointer; font-family: var(--font-sans); transition: var(--transition-base);
         }
-
         .notification__btn--primary { background-color: #d97706; color: #fff; border-color: #d97706; }
         .notification__btn--primary:hover { background-color: #b45309; border-color: #b45309; }
         .notification__btn--danger { color: #dc2626; }
@@ -1072,6 +824,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         .workspace--uni .panel--workflow { flex: 0 0 auto; min-height: 180px; display: flex; flex-direction: column; }
         .workspace--dash { min-height: calc(100vh - 46px - 62px); }
         .workspace--student { min-height: calc(100vh - 46px - 62px); }
+        .workspace--parent { min-height: calc(100vh - 46px - 62px); }
 
         .panel { background-color: var(--color-white); border: 1px solid rgba(26, 26, 26, 0.1); padding: var(--space-md); }
         .panel--workflow { flex: 0 0 auto; min-height: 230px; display: flex; flex-direction: column; }
@@ -1080,120 +833,40 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         .panel--students { flex: 0 0 auto; display: flex; flex-direction: column; }
         .panel--tabs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
-        .panel__head {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: var(--space-sm);
-            margin-bottom: var(--space-sm);
-        }
-
+        .panel__head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-sm); margin-bottom: var(--space-sm); }
         .panel__title { font-size: 1.4rem; }
         .panel__subtitle { color: var(--color-tertiary); font-size: 0.85rem; }
 
         .panel__hint {
-            display: inline-block;
-            margin-top: 6px;
-            font-size: 0.78rem;
-            color: var(--color-accent-dark);
-            background-color: rgba(139, 105, 20, 0.08);
-            border: 1px dashed var(--color-accent);
-            padding: 3px 8px;
+            display: inline-block; margin-top: 6px; font-size: 0.78rem;
+            color: var(--color-accent-dark); background-color: rgba(139, 105, 20, 0.08);
+            border: 1px dashed var(--color-accent); padding: 3px 8px;
         }
-
-        .panel__hint--phase {
-            background-color: rgba(37, 99, 235, 0.08);
-            border-color: #2563eb;
-            color: #1d4ed8;
-        }
+        .panel__hint--phase { background-color: rgba(37, 99, 235, 0.08); border-color: #2563eb; color: #1d4ed8; }
 
         .project-select { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
-
-        .project-select select {
-            padding: 0.4rem 0.6rem;
-            border: 1px solid rgba(26, 26, 26, 0.15);
-            background-color: var(--color-white);
-            font-family: var(--font-sans);
-            font-size: 0.85rem;
-            max-width: 380px;
-        }
+        .project-select select { padding: 0.4rem 0.6rem; border: 1px solid rgba(26, 26, 26, 0.15); background-color: var(--color-white); font-family: var(--font-sans); font-size: 0.85rem; max-width: 380px; }
 
         .workflow-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; }
         .workflow-scroll--uni { overflow-y: auto; padding-right: 4px; }
-
-        .workflow-track {
-            display: flex;
-            align-items: stretch;
-            gap: 4px;
-            padding: 4px 2px 8px;
-        }
+        .workflow-track { display: flex; align-items: stretch; gap: 4px; padding: 4px 2px 8px; }
 
         .wstep {
-            position: relative;
-            flex: 1 1 0;
-            min-width: 0;
-            min-height: 108px;
-            border: 1px solid rgba(26, 26, 26, 0.12);
-            border-top: 4px solid rgba(26, 26, 26, 0.2);
-            background-color: var(--color-light);
-            padding: 26px 6px 6px;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            transition: var(--transition-base);
+            position: relative; flex: 1 1 0; min-width: 0; min-height: 108px;
+            border: 1px solid rgba(26, 26, 26, 0.12); border-top: 4px solid rgba(26, 26, 26, 0.2);
+            background-color: var(--color-light); padding: 26px 6px 6px;
+            display: flex; flex-direction: column; gap: 4px; transition: var(--transition-base);
         }
-
         .wstep:hover { border-color: var(--color-accent); }
-
-        .wstep.current {
-            border-color: var(--color-accent);
-            background-color: rgba(139, 105, 20, 0.06);
-            box-shadow: 0 0 0 1px var(--color-accent);
-        }
-
+        .wstep.current { border-color: var(--color-accent); background-color: rgba(139, 105, 20, 0.06); box-shadow: 0 0 0 1px var(--color-accent); }
         .wstep__num { position: absolute; top: 4px; left: 6px; font-size: 0.75rem; font-weight: 600; color: var(--color-tertiary); }
         .wstep.current .wstep__num { color: var(--color-accent-dark); }
-
-        .wstep__side {
-            position: absolute;
-            top: 4px;
-            right: 6px;
-            font-size: 0.6rem;
-            font-weight: 600;
-            letter-spacing: 0.04em;
-            padding: 1px 5px;
-            border: 1px solid rgba(26, 26, 26, 0.25);
-            color: var(--color-secondary);
-            background-color: var(--color-white);
-        }
-
+        .wstep__side { position: absolute; top: 4px; right: 6px; font-size: 0.6rem; font-weight: 600; letter-spacing: 0.04em; padding: 1px 5px; border: 1px solid rgba(26, 26, 26, 0.25); color: var(--color-secondary); background-color: var(--color-white); }
         .wstep__side--both { border-color: var(--color-accent); color: var(--color-accent-dark); }
-
-        .wstep__name {
-            font-size: 0.66rem;
-            line-height: 1.2;
-            color: var(--color-secondary);
-            overflow: hidden;
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-        }
-
-        .wstep__status {
-            margin-top: auto;
-            font-size: 0.62rem;
-            font-weight: 500;
-            padding: 1px 5px;
-            border: 1px solid rgba(26, 26, 26, 0.2);
-            background-color: var(--color-white);
-            align-self: flex-start;
-            white-space: nowrap;
-        }
-
+        .wstep__name { font-size: 0.66rem; line-height: 1.2; color: var(--color-secondary); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+        .wstep__status { margin-top: auto; font-size: 0.62rem; font-weight: 500; padding: 1px 5px; border: 1px solid rgba(26, 26, 26, 0.2); background-color: var(--color-white); align-self: flex-start; white-space: nowrap; }
         .wstep__bar { height: 6px; background-color: rgba(26, 26, 26, 0.08); }
         .wstep__bar-fill { height: 100%; }
-
         .wstep__flag { position: absolute; top: -7px; right: 22px; font-size: 0.6rem; font-weight: 700; color: var(--color-accent-dark); }
 
         .wstep--completed { border-top-color: #16a34a; }
@@ -1214,1104 +887,384 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         .workflow-track--compact .wstep__side { font-size: 0.55rem; padding: 1px 4px; }
         .workflow-track--compact .wstep__num { font-size: 0.65rem; }
 
-        @media (max-width: 1100px) {
-            .workflow-track { overflow-x: auto; }
-            .wstep { flex: 0 0 96px; }
-        }
+        @media (max-width: 1100px) { .workflow-track { overflow-x: auto; } .wstep { flex: 0 0 96px; } }
 
-        .wf-legend {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem var(--space-md);
-            margin-top: auto;
-            padding-top: var(--space-xs);
-            border-top: 1px solid rgba(26, 26, 26, 0.08);
-        }
-
+        .wf-legend { display: flex; flex-wrap: wrap; gap: 0.4rem var(--space-md); margin-top: auto; padding-top: var(--space-xs); border-top: 1px solid rgba(26, 26, 26, 0.08); }
         .wf-legend__item { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; color: var(--color-secondary); }
         .wf-legend__swatch { width: 12px; height: 12px; border: 1px solid rgba(26, 26, 26, 0.2); flex-shrink: 0; }
 
         .uni-workflow { padding: 10px 0 12px; border-bottom: 1px solid rgba(26, 26, 26, 0.08); }
         .uni-workflow:first-child { padding-top: 0; }
         .uni-workflow:last-child { border-bottom: none; padding-bottom: 0; }
-
-        .uni-workflow__head {
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: var(--space-sm);
-            flex-wrap: wrap;
-            margin-bottom: 4px;
-        }
-
+        .uni-workflow__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-sm); flex-wrap: wrap; margin-bottom: 4px; }
         .uni-workflow__title { font-size: 0.85rem; font-weight: 600; color: var(--color-primary); }
         .uni-workflow__meta { font-size: 0.72rem; color: var(--color-tertiary); }
 
-        .uni-empty {
-            padding: var(--space-md);
-            font-size: 0.9rem;
-            color: var(--color-tertiary);
-            text-align: center;
-            background-color: var(--color-light);
-            border: 1px dashed rgba(26, 26, 26, 0.15);
-        }
+        .uni-empty { padding: var(--space-md); font-size: 0.9rem; color: var(--color-tertiary); text-align: center; background-color: var(--color-light); border: 1px dashed rgba(26, 26, 26, 0.15); }
 
         .matrix-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid rgba(26, 26, 26, 0.1); }
-
         body.is-dragging .matrix-scroll { perspective: 1200px; }
 
-        table.matrix {
-            width: 100%;
-            min-width: 880px;
-            table-layout: fixed;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 0.8rem;
-            background-color: var(--color-white);
-            transition: transform 0.25s ease-out;
-            transform-origin: 50% 50%;
-        }
-
+        table.matrix { width: 100%; min-width: 880px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; background-color: var(--color-white); transition: transform 0.25s ease-out; transform-origin: 50% 50%; }
         body.is-dragging table.matrix { transform: rotateX(7deg); }
 
         table.matrix th, table.matrix td {
-            border-right: 1px solid rgba(26, 26, 26, 0.1);
-            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
-            padding: 3px;
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            border-right: 1px solid rgba(26, 26, 26, 0.1); border-bottom: 1px solid rgba(26, 26, 26, 0.1);
+            padding: 3px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-
-        table.matrix thead th {
-            background-color: var(--color-primary);
-            color: var(--color-white);
-            font-weight: 500;
-            position: sticky;
-            top: 0;
-            z-index: 2;
-            padding: 0.4rem 0.3rem;
-        }
-
-        table.matrix tbody th {
-            background-color: var(--color-light);
-            text-align: left;
-            font-weight: 500;
-            position: sticky;
-            left: 0;
-            z-index: 1;
-            padding: 0.4rem 0.3rem;
-        }
+        table.matrix thead th { background-color: var(--color-primary); color: var(--color-white); font-weight: 500; position: sticky; top: 0; z-index: 2; padding: 0.4rem 0.3rem; }
+        table.matrix tbody th { background-color: var(--color-light); text-align: left; font-weight: 500; position: sticky; left: 0; z-index: 1; padding: 0.4rem 0.3rem; }
 
         table.matrix .uni { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
-
-        table.matrix .uni__crest {
-            width: 20px; height: 20px;
-            object-fit: contain;
-            flex-shrink: 0;
-            background-color: var(--color-white);
-            border: 1px solid rgba(26, 26, 26, 0.12);
-            border-radius: 50%;
-            padding: 1px;
-        }
-
-        table.matrix .uni__initial {
-            width: 20px; height: 20px;
-            flex-shrink: 0;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.65rem;
-            font-weight: 600;
-            color: var(--color-white);
-            background-color: var(--color-accent);
-            border-radius: 50%;
-        }
-
+        table.matrix .uni__crest { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; background-color: var(--color-white); border: 1px solid rgba(26, 26, 26, 0.12); border-radius: 50%; padding: 1px; }
+        table.matrix .uni__initial { width: 20px; height: 20px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 600; color: var(--color-white); background-color: var(--color-accent); border-radius: 50%; }
         table.matrix .uni__code { overflow: hidden; text-overflow: ellipsis; }
         table.matrix thead th:first-child { z-index: 3; }
 
-        table.matrix td {
-            color: var(--color-primary);
-            font-weight: 500;
-            cursor: default;
-            height: 52px;
-            position: relative;
-        }
-
-        table.matrix td.empty {
-            background-color: var(--color-white);
-            color: rgba(26, 26, 26, 0.25);
-            padding: 0.4rem 0.3rem;
-        }
-
+        table.matrix td { color: var(--color-primary); font-weight: 500; cursor: default; height: 52px; position: relative; }
+        table.matrix td.empty { background-color: var(--color-white); color: rgba(26, 26, 26, 0.25); padding: 0.4rem 0.3rem; }
         table.matrix td.phase { padding: 3px; }
 
         table.matrix td.phase .sticker-cell {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            height: 100%;
-            min-height: 42px;
+            position: relative; display: flex; align-items: center; justify-content: center;
+            width: 100%; height: 100%; min-height: 42px;
             background-color: var(--phase-color, #fde68a);
-            background-image: linear-gradient(
-                180deg,
-                rgba(255, 255, 255, 0.35) 0%,
-                rgba(255, 255, 255, 0.08) 45%,
-                rgba(0, 0, 0, 0.10) 100%
-            );
+            background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.08) 45%, rgba(0, 0, 0, 0.10) 100%);
             border-radius: 2px;
-            box-shadow:
-                0 1px 2px rgba(0, 0, 0, 0.15),
-                0 2px 6px rgba(0, 0, 0, 0.08);
-            font-weight: 700;
-            color: #ffffff;
-            font-size: 1rem;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.08);
+            font-weight: 700; color: #ffffff; font-size: 1rem;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
             transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, opacity 0.2s;
             overflow: hidden;
         }
-
         table.matrix td.phase .sticker-cell::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: 50%;
-            width: 22px;
-            height: 8px;
-            margin-left: -11px;
-            background: rgba(255, 255, 255, 0.55);
-            border: 1px solid rgba(0, 0, 0, 0.04);
-            transform: rotate(-2deg);
-            border-radius: 1px;
+            content: ''; position: absolute; top: -2px; left: 50%; width: 22px; height: 8px;
+            margin-left: -11px; background: rgba(255, 255, 255, 0.55);
+            border: 1px solid rgba(0, 0, 0, 0.04); transform: rotate(-2deg); border-radius: 1px;
         }
-
         table.matrix td.clickable { cursor: grab; }
         table.matrix td.clickable:active { cursor: grabbing; }
-
         table.matrix td.clickable:hover .sticker-cell {
             transform: translateY(-2px) rotate(-1.5deg);
-            box-shadow:
-                0 3px 6px rgba(0, 0, 0, 0.18),
-                0 6px 14px rgba(0, 0, 0, 0.12);
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.18), 0 6px 14px rgba(0, 0, 0, 0.12);
         }
-
-        table.matrix td.clickable:focus-visible { outline: 2px solid var(--color-accent-dark); outline-offset: -2px; }
-
         table.matrix td.is-current-project .sticker-cell {
-            box-shadow:
-                0 3px 6px rgba(0, 0, 0, 0.2),
-                0 8px 18px rgba(0, 0, 0, 0.16),
-                inset 0 0 0 3px var(--color-accent-dark);
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2), 0 8px 18px rgba(0, 0, 0, 0.16), inset 0 0 0 3px var(--color-accent-dark);
             transform: rotate(-2deg) scale(1.05);
         }
-
         table.matrix td.is-current-project .sticker-cell::after {
-            content: '◆';
-            position: absolute;
-            top: 1px;
-            right: 3px;
-            font-size: 0.55rem;
-            line-height: 1;
-            color: #ffffff;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+            content: '◆'; position: absolute; top: 1px; right: 3px; font-size: 0.55rem; line-height: 1; color: #ffffff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
         }
-
-        table.matrix td.is-pending .sticker-cell {
-            animation: pulse-pending 1.8s ease-in-out infinite;
-            outline: 2px dashed #b45309;
-            outline-offset: -2px;
-        }
-
+        table.matrix td.is-pending .sticker-cell { animation: pulse-pending 1.8s ease-in-out infinite; outline: 2px dashed #b45309; outline-offset: -2px; }
         @keyframes pulse-pending {
             0%, 100% { box-shadow: 0 1px 2px rgba(0,0,0,0.15), 0 0 0 0 rgba(180, 83, 9, 0.5); }
             50%      { box-shadow: 0 1px 2px rgba(0,0,0,0.15), 0 0 0 10px rgba(180, 83, 9, 0); }
         }
-
-        body.is-dragging table.matrix td.phase .sticker-cell {
-            opacity: 0.35;
-            filter: grayscale(0.4);
-            transition: opacity 0.2s, filter 0.2s;
-        }
-
-        body.is-dragging table.matrix td.is-drag-source {
-            z-index: 100;
-            overflow: visible;
-        }
-
+        body.is-dragging table.matrix td.phase .sticker-cell { opacity: 0.35; filter: grayscale(0.4); }
+        body.is-dragging table.matrix td.is-drag-source { z-index: 100; overflow: visible; }
         body.is-dragging table.matrix td.is-drag-source .sticker-cell {
-            opacity: 1;
-            filter: none;
+            opacity: 1; filter: none;
             transform: rotate(-7deg) scale(1.25) translateZ(60px);
-            box-shadow:
-                0 10px 20px rgba(0, 0, 0, 0.28),
-                0 24px 48px rgba(0, 0, 0, 0.22);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.28), 0 24px 48px rgba(0, 0, 0, 0.22);
         }
 
         .phase-pocket {
-            position: fixed;
-            z-index: 10000;
-            width: 240px;
-            padding: 10px 12px 12px;
-            background: var(--color-white);
-            border: 2px dashed var(--color-accent);
-            border-radius: 6px;
-            box-shadow:
-                0 6px 16px rgba(0, 0, 0, 0.18),
-                0 16px 40px rgba(0, 0, 0, 0.15);
-            font-family: var(--font-sans);
-            cursor: copy;
-            opacity: 0;
+            position: fixed; z-index: 10000; width: 240px; padding: 10px 12px 12px;
+            background: var(--color-white); border: 2px dashed var(--color-accent); border-radius: 6px;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18), 0 16px 40px rgba(0, 0, 0, 0.15);
+            font-family: var(--font-sans); cursor: copy; opacity: 0;
             transform: translateY(8px) scale(0.94);
             transition: transform 0.2s ease-out, box-shadow 0.2s, background-color 0.2s, border-color 0.2s;
-            pointer-events: auto;
-            user-select: none;
+            pointer-events: auto; user-select: none;
         }
-
         .phase-pocket.is-visible { opacity: 1; transform: translateY(0) scale(1); }
-
-        .phase-pocket.is-hover {
-            background: rgba(139, 105, 20, 0.1);
-            border-style: solid;
-            transform: translateY(0) scale(1.05);
-            box-shadow:
-                0 10px 24px rgba(0, 0, 0, 0.22),
-                0 20px 48px rgba(0, 0, 0, 0.18);
-        }
-
-        .phase-pocket__label {
-            font-size: 0.62rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--color-tertiary);
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
+        .phase-pocket.is-hover { background: rgba(139, 105, 20, 0.1); border-style: solid; transform: translateY(0) scale(1.05); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22), 0 20px 48px rgba(0, 0, 0, 0.18); }
+        .phase-pocket__label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-tertiary); margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
         .phase-pocket__label-arrow { font-size: 0.9rem; font-weight: 700; color: var(--color-accent-dark); line-height: 1; }
-
-        .phase-pocket__body {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 0.85rem;
-            font-weight: 500;
-            color: var(--color-primary);
-            line-height: 1.25;
-        }
-
-        .phase-pocket__num {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            color: #fff;
-            font-size: 0.75rem;
-            font-weight: 700;
-            flex-shrink: 0;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-        }
-
+        .phase-pocket__body { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 500; color: var(--color-primary); line-height: 1.25; }
+        .phase-pocket__num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; color: #fff; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
         .phase-pocket__name { flex: 1; min-width: 0; }
         .phase-pocket__lock { margin-left: auto; font-size: 0.9rem; flex-shrink: 0; }
+        .phase-pocket__pin { position: absolute; left: 50%; width: 10px; height: 10px; margin-left: -5px; background: var(--color-white); border: 2px dashed var(--color-accent); border-radius: 50%; }
+        .phase-pocket--prev .phase-pocket__pin { bottom: -7px; border-top-color: transparent; border-right-color: transparent; transform: rotate(45deg); }
+        .phase-pocket--next .phase-pocket__pin { top: -7px; border-bottom-color: transparent; border-left-color: transparent; transform: rotate(45deg); }
 
-        .phase-pocket__pin {
-            position: absolute;
-            left: 50%;
-            width: 10px;
-            height: 10px;
-            margin-left: -5px;
-            background: var(--color-white);
-            border: 2px dashed var(--color-accent);
-            border-radius: 50%;
-        }
-
-        .phase-pocket--prev .phase-pocket__pin {
-            bottom: -7px;
-            border-top-color: transparent;
-            border-right-color: transparent;
-            transform: rotate(45deg);
-        }
-
-        .phase-pocket--next .phase-pocket__pin {
-            top: -7px;
-            border-bottom-color: transparent;
-            border-left-color: transparent;
-            transform: rotate(45deg);
-        }
-
-        .legend {
-            margin-top: var(--space-md);
-            padding: var(--space-sm) var(--space-md);
-            background-color: var(--color-light);
-            border: 1px solid rgba(26, 26, 26, 0.1);
-            flex-shrink: 0;
-        }
-
+        .legend { margin-top: var(--space-md); padding: var(--space-sm) var(--space-md); background-color: var(--color-light); border: 1px solid rgba(26, 26, 26, 0.1); flex-shrink: 0; }
         .legend__title { font-family: var(--font-serif); font-size: 1.1rem; margin-bottom: var(--space-sm); }
         .legend__items { display: flex; flex-wrap: wrap; gap: 0.5rem var(--space-md); }
         .legend__item { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--color-secondary); }
         .legend__swatch { width: 16px; height: 16px; border: 1px solid rgba(26, 26, 26, 0.2); flex-shrink: 0; border-radius: 2px; }
 
-        /* ===== Табы ===== */
-        .tabs {
-            display: flex;
-            gap: 2px;
-            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
-            margin-bottom: var(--space-md);
-        }
-
+        .tabs { display: flex; gap: 2px; border-bottom: 1px solid rgba(26, 26, 26, 0.1); margin-bottom: var(--space-md); }
         .tab {
-            padding: 10px 20px;
-            font-family: var(--font-sans);
-            font-size: 0.9rem;
-            font-weight: 500;
-            border: 1px solid transparent;
-            border-bottom: none;
-            background: transparent;
-            color: var(--color-secondary);
-            cursor: pointer;
-            transition: var(--transition-base);
-            border-radius: 2px 2px 0 0;
-            position: relative;
-            top: 1px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
+            padding: 10px 20px; font-family: var(--font-sans); font-size: 0.9rem; font-weight: 500;
+            border: 1px solid transparent; border-bottom: none; background: transparent;
+            color: var(--color-secondary); cursor: pointer; transition: var(--transition-base);
+            border-radius: 2px 2px 0 0; position: relative; top: 1px;
+            display: inline-flex; align-items: center; gap: 6px;
         }
-
         .tab:hover { background: rgba(139, 105, 20, 0.06); color: var(--color-primary); }
-
-        .tab.is-active {
-            background: var(--color-white);
-            color: var(--color-primary);
-            border-color: rgba(26, 26, 26, 0.1);
-            border-bottom: 1px solid var(--color-white);
-            font-weight: 600;
-        }
-
-        .tab.is-active::after {
-            content: '';
-            position: absolute;
-            left: 10px;
-            right: 10px;
-            bottom: -1px;
-            height: 3px;
-            background: var(--color-accent);
-        }
-
+        .tab.is-active { background: var(--color-white); color: var(--color-primary); border-color: rgba(26, 26, 26, 0.1); border-bottom: 1px solid var(--color-white); font-weight: 600; }
+        .tab.is-active::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 3px; background: var(--color-accent); }
         .tab-content { display: none; flex: 1; min-height: 0; flex-direction: column; }
         .tab-content.is-active { display: flex; }
 
-        /* ===== История фаз студента (timeline) ===== */
-        .phase-timeline-wrap {
-            flex: 1;
-            min-height: 0;
-            overflow: auto;
-            border: 1px solid rgba(26, 26, 26, 0.1);
-            background: var(--color-white);
-        }
-
-        table.students-timeline {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 0.82rem;
-        }
-
-        table.students-timeline th,
-        table.students-timeline td {
-            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
-            padding: 10px 12px;
-            vertical-align: middle;
-        }
-
-        table.students-timeline thead th {
-            background-color: var(--color-primary);
-            color: #fff;
-            font-weight: 500;
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            text-align: left;
-            position: sticky;
-            top: 0;
-            z-index: 2;
-        }
-
+        .phase-timeline-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid rgba(26, 26, 26, 0.1); background: var(--color-white); }
+        table.students-timeline { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; }
+        table.students-timeline th, table.students-timeline td { border-bottom: 1px solid rgba(26, 26, 26, 0.1); padding: 10px 12px; vertical-align: middle; }
+        table.students-timeline thead th { background-color: var(--color-primary); color: #fff; font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; position: sticky; top: 0; z-index: 2; }
         table.students-timeline thead th:first-child { width: 240px; }
-
         table.students-timeline tbody tr:hover { background-color: rgba(139, 105, 20, 0.04); }
+        table.students-timeline td.student-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        table.students-timeline td.student-name .student-sub { display: block; font-weight: 400; font-size: 0.7rem; color: var(--color-tertiary); }
 
-        table.students-timeline td.student-name {
-            font-weight: 500;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        table.students-timeline td.student-name .student-sub {
-            display: block;
-            font-weight: 400;
-            font-size: 0.7rem;
-            color: var(--color-tertiary);
-        }
-
-        .phase-timeline {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            flex-wrap: nowrap;
-            overflow-x: auto;
-            padding: 4px 0;
-        }
-
+        .phase-timeline { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow-x: auto; padding: 4px 0; }
         .phase-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 9px;
-            border-radius: 2px;
-            font-size: 0.72rem;
-            font-weight: 600;
-            color: #fff;
-            white-space: nowrap;
-            flex-shrink: 0;
+            display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 2px;
+            font-size: 0.72rem; font-weight: 600; color: #fff; white-space: nowrap; flex-shrink: 0;
             background: var(--phase-color);
             background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%);
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-            position: relative;
-            cursor: default;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); position: relative; cursor: default;
         }
+        .phase-chip::before { content: ''; position: absolute; top: -2px; left: 50%; width: 14px; height: 5px; margin-left: -7px; background: rgba(255, 255, 255, 0.55); border-radius: 1px; }
+        .phase-chip__num { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(0, 0, 0, 0.2); font-size: 0.65rem; font-weight: 700; line-height: 1; }
+        .phase-chip__date { font-size: 0.65rem; font-weight: 400; opacity: 0.92; }
+        .phase-arrow { color: var(--color-tertiary); font-size: 0.85rem; flex-shrink: 0; line-height: 1; padding: 0 1px; }
+        .phase-arrow--return { color: #b45309; font-weight: 700; }
+        .phase-timeline-empty { font-size: 0.78rem; color: var(--color-tertiary); font-style: italic; }
 
-        .phase-chip::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: 50%;
-            width: 14px;
-            height: 5px;
-            margin-left: -7px;
-            background: rgba(255, 255, 255, 0.55);
-            border-radius: 1px;
-        }
+        .journal-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid rgba(26, 26, 26, 0.1); background: var(--color-white); margin-bottom: var(--space-sm); }
+        table.journal { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; table-layout: fixed; }
+        table.journal th, table.journal td { border-right: 1px solid rgba(26, 26, 26, 0.1); border-bottom: 1px solid rgba(26, 26, 26, 0.1); padding: 6px 4px; text-align: center; vertical-align: middle; }
+        table.journal thead th { background-color: var(--color-primary); color: #fff; font-weight: 500; font-size: 0.72rem; letter-spacing: 0.04em; padding: 8px 4px; position: sticky; top: 0; z-index: 2; cursor: pointer; transition: background 0.15s; }
+        table.journal thead th:first-child { text-align: left; cursor: default; width: 220px; z-index: 3; }
+        table.journal thead th[data-date-index]:hover { background-color: var(--color-accent-dark); }
+        table.journal thead th.is-selected { background-color: var(--color-accent); box-shadow: inset 0 -3px 0 var(--color-accent-dark); }
+        table.journal tbody td:first-child { text-align: left; font-weight: 500; background-color: var(--color-light); position: sticky; left: 0; z-index: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        table.journal tbody tr:hover td:not(:first-child) { background-color: rgba(139, 105, 20, 0.04); }
+        table.journal td.journal-cell { padding: 4px; position: relative; cursor: pointer; transition: background 0.15s; }
+        table.journal td.journal-cell:hover { background-color: rgba(139, 105, 20, 0.08); }
+        table.journal td.journal-cell.is-highlighted { background-color: rgba(139, 105, 20, 0.1); }
+        table.journal td.journal-cell.has-note::after { content: ''; position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: #d97706; box-shadow: 0 0 0 1.5px var(--color-white); }
 
-        .phase-chip__num {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: rgba(0, 0, 0, 0.2);
-            font-size: 0.65rem;
-            font-weight: 700;
-            line-height: 1;
-        }
-
-        .phase-chip__date {
-            font-size: 0.65rem;
-            font-weight: 400;
-            opacity: 0.92;
-        }
-
-        .phase-arrow {
-            color: var(--color-tertiary);
-            font-size: 0.85rem;
-            flex-shrink: 0;
-            line-height: 1;
-            padding: 0 1px;
-        }
-
-        .phase-arrow--return {
-            color: #b45309;
-            font-weight: 700;
-        }
-
-        .phase-timeline-empty {
-            font-size: 0.78rem;
-            color: var(--color-tertiary);
-            font-style: italic;
-        }
-
-        /* ===== Журнал ===== */
-        .journal-wrap {
-            flex: 1;
-            min-height: 0;
-            overflow: auto;
-            border: 1px solid rgba(26, 26, 26, 0.1);
-            background: var(--color-white);
-            margin-bottom: var(--space-sm);
-        }
-
-        table.journal {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 0.82rem;
-            table-layout: fixed;
-        }
-
-        table.journal th,
-        table.journal td {
-            border-right: 1px solid rgba(26, 26, 26, 0.1);
-            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
-            padding: 6px 4px;
-            text-align: center;
-            vertical-align: middle;
-        }
-
-        table.journal thead th {
-            background-color: var(--color-primary);
-            color: #fff;
-            font-weight: 500;
-            font-size: 0.72rem;
-            letter-spacing: 0.04em;
-            padding: 8px 4px;
-            position: sticky;
-            top: 0;
-            z-index: 2;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-
-        table.journal thead th:first-child {
-            text-align: left;
-            cursor: default;
-            width: 220px;
-            z-index: 3;
-        }
-
-        table.journal thead th[data-date-index]:hover {
-            background-color: var(--color-accent-dark);
-        }
-
-        table.journal thead th.is-selected {
-            background-color: var(--color-accent);
-            box-shadow: inset 0 -3px 0 var(--color-accent-dark);
-        }
-
-        table.journal tbody td:first-child {
-            text-align: left;
-            font-weight: 500;
-            background-color: var(--color-light);
-            position: sticky;
-            left: 0;
-            z-index: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        table.journal tbody tr:hover td:not(:first-child) {
-            background-color: rgba(139, 105, 20, 0.04);
-        }
-
-        table.journal td.journal-cell {
-            padding: 4px;
-        }
-
-        table.journal td.journal-cell.is-highlighted {
-            background-color: rgba(139, 105, 20, 0.1);
-        }
-
-        .journal-mark {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 24px;
-            height: 24px;
-            font-weight: 600;
-            font-size: 0.85rem;
-            border-radius: 2px;
-        }
-
+        .journal-mark { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; font-weight: 600; font-size: 0.85rem; border-radius: 2px; }
         .journal-mark--grade-5 { color: #16a34a; }
         .journal-mark--grade-4 { color: #2563eb; }
         .journal-mark--grade-3 { color: #d97706; }
         .journal-mark--grade-2 { color: #dc2626; }
         .journal-mark--dot { color: var(--color-accent); font-size: 1rem; }
-        .journal-mark--absent {
-            color: #dc2626;
-            font-weight: 700;
-            background-color: rgba(220, 38, 38, 0.08);
-        }
+        .journal-mark--absent { color: #dc2626; font-weight: 700; background-color: rgba(220, 38, 38, 0.08); }
 
-        .journal-lesson {
-            padding: var(--space-md);
-            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
-            border-left: 4px solid var(--color-accent);
-            transition: all 0.2s ease-out;
-            min-height: 90px;
-        }
-
-        .journal-lesson__date {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--color-accent-dark);
-            font-weight: 600;
-            margin-bottom: 6px;
-        }
-
-        .journal-lesson__title {
-            font-family: var(--font-serif);
-            font-size: 1.15rem;
-            font-weight: 500;
-            line-height: 1.25;
-            color: var(--color-primary);
-            margin-bottom: 8px;
-        }
-
-        .journal-lesson__homework {
-            font-size: 0.85rem;
-            color: var(--color-secondary);
-            line-height: 1.5;
-        }
-
+        .journal-lesson { padding: var(--space-md); background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%); border-left: 4px solid var(--color-accent); transition: all 0.2s ease-out; min-height: 90px; }
+        .journal-lesson__date { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-accent-dark); font-weight: 600; margin-bottom: 6px; }
+        .journal-lesson__title { font-family: var(--font-serif); font-size: 1.15rem; font-weight: 500; line-height: 1.25; color: var(--color-primary); margin-bottom: 8px; }
+        .journal-lesson__homework { font-size: 0.85rem; color: var(--color-secondary); line-height: 1.5; }
         .journal-lesson__homework strong { color: var(--color-accent-dark); font-weight: 600; }
+        .journal-lesson--empty .journal-lesson__title { color: var(--color-tertiary); font-size: 0.95rem; font-family: var(--font-sans); font-weight: 400; }
 
-        .journal-lesson--empty .journal-lesson__title {
-            color: var(--color-tertiary);
-            font-size: 0.95rem;
-            font-family: var(--font-sans);
-            font-weight: 400;
+        .note-popover {
+            position: fixed; z-index: 20000; width: 340px; background: var(--color-white);
+            border: 1px solid rgba(26, 26, 26, 0.15); border-left: 4px solid var(--color-accent);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15), 0 20px 48px rgba(0, 0, 0, 0.1);
+            padding: 14px 16px; font-family: var(--font-sans); font-size: 0.85rem;
+            opacity: 0; transform: translateY(-6px) scale(0.98);
+            transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+            pointer-events: none;
         }
+        .note-popover.is-visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+        .note-popover__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+        .note-popover__student { font-family: var(--font-serif); font-size: 1.05rem; font-weight: 500; line-height: 1.15; color: var(--color-primary); }
+        .note-popover__meta { font-size: 0.7rem; color: var(--color-tertiary); margin-top: 4px; }
+        .note-popover__mark { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; border-radius: 3px; font-size: 0.95rem; font-weight: 700; background: rgba(139, 105, 20, 0.1); padding: 0 8px; flex-shrink: 0; }
+        .note-popover__mark--grade-5 { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
+        .note-popover__mark--grade-4 { background: rgba(37, 99, 235, 0.12); color: #2563eb; }
+        .note-popover__mark--grade-3 { background: rgba(217, 119, 6, 0.15); color: #d97706; }
+        .note-popover__mark--grade-2 { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
+        .note-popover__mark--dot    { background: rgba(139, 105, 20, 0.14); color: var(--color-accent-dark); }
+        .note-popover__mark--absent { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
+        .note-popover__label { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-tertiary); margin-bottom: 4px; }
+        .note-popover__textarea { width: 100%; min-height: 80px; padding: 8px 10px; font-family: var(--font-sans); font-size: 0.85rem; line-height: 1.45; border: 1px solid rgba(26, 26, 26, 0.15); background: #fdfcf9; color: var(--color-primary); resize: vertical; transition: border-color 0.15s; }
+        .note-popover__textarea:focus { outline: none; border-color: var(--color-accent); background: #fff; }
+        .note-popover__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+        .note-popover__btn { padding: 6px 14px; font-size: 0.78rem; font-weight: 500; font-family: var(--font-sans); border: 1px solid rgba(26, 26, 26, 0.15); background: #fff; color: var(--color-secondary); cursor: pointer; transition: 0.15s; }
+        .note-popover__btn:hover { background: rgba(0, 0, 0, 0.04); color: var(--color-primary); }
+        .note-popover__btn--primary { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+        .note-popover__btn--primary:hover { background: var(--color-accent-light); color: #fff; }
+        .note-popover__btn--danger { color: #dc2626; }
+        .note-popover__btn--danger:hover { background: rgba(220, 38, 38, 0.08); }
+        .note-popover__hint { font-size: 0.68rem; color: var(--color-tertiary); margin-top: 8px; font-style: italic; }
 
-        /* ===== Статистика студентов (у менеджера) ===== */
-        .students-layout {
-            display: grid;
-            grid-template-columns: 1fr 340px;
-            gap: var(--space-md);
-            align-items: start;
-        }
-
+        .students-layout { display: grid; grid-template-columns: 1fr 340px; gap: var(--space-md); align-items: start; }
         @media (max-width: 1100px) { .students-layout { grid-template-columns: 1fr; } }
-
         .students-block { background: var(--color-white); }
 
-        .git-history {
-            background: #1a1a1a;
-            border-radius: 3px;
-            padding: 12px 0;
-            font-family: var(--font-mono);
-            font-size: 0.75rem;
-            color: #d4d4d4;
-            line-height: 1.5;
-            overflow: hidden;
-        }
-
-        .git-history__header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 0 14px 10px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            margin-bottom: 8px;
-            color: #8b6914;
-            font-weight: 500;
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
-
-        .git-history__branch {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 1px 8px;
-            border-radius: 10px;
-            background: rgba(139, 105, 20, 0.2);
-            color: #d4b35a;
-            font-size: 0.68rem;
-            letter-spacing: 0.02em;
-            text-transform: none;
-        }
-
+        .git-history { background: #1a1a1a; border-radius: 3px; padding: 12px 0; font-family: var(--font-mono); font-size: 0.75rem; color: #d4d4d4; line-height: 1.5; overflow: hidden; }
+        .git-history__header { display: flex; align-items: center; gap: 8px; padding: 0 14px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px; color: #8b6914; font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; }
+        .git-history__branch { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px; background: rgba(139, 105, 20, 0.2); color: #d4b35a; font-size: 0.68rem; letter-spacing: 0.02em; text-transform: none; }
         .git-history__list { display: flex; flex-direction: column; padding: 0 4px; }
-
-        .git-history__item {
-            display: grid;
-            grid-template-columns: 12px 70px 1fr;
-            gap: 10px;
-            padding: 5px 10px;
-            border-radius: 2px;
-            transition: background 0.15s;
-            align-items: baseline;
-        }
-
+        .git-history__item { display: grid; grid-template-columns: 12px 70px 1fr; gap: 10px; padding: 5px 10px; border-radius: 2px; transition: background 0.15s; align-items: baseline; }
         .git-history__item:hover { background: rgba(255, 255, 255, 0.04); }
-
-        .git-history__graph {
-            position: relative;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .git-history__graph::before {
-            content: '';
-            position: absolute;
-            top: -5px;
-            bottom: -5px;
-            left: 50%;
-            width: 1px;
-            background: rgba(139, 105, 20, 0.4);
-            margin-left: -0.5px;
-        }
-
+        .git-history__graph { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; }
+        .git-history__graph::before { content: ''; position: absolute; top: -5px; bottom: -5px; left: 50%; width: 1px; background: rgba(139, 105, 20, 0.4); margin-left: -0.5px; }
         .git-history__item:first-child .git-history__graph::before { top: 50%; }
         .git-history__item:last-child .git-history__graph::before { bottom: 50%; }
-
-        .git-history__dot {
-            position: relative;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #8b6914;
-            z-index: 1;
-            box-shadow: 0 0 0 2px #1a1a1a;
-        }
-
-        .git-history__item:first-child .git-history__dot {
-            background: #d4b35a;
-            box-shadow: 0 0 0 2px #1a1a1a, 0 0 8px rgba(212, 179, 90, 0.5);
-        }
-
+        .git-history__dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: #8b6914; z-index: 1; box-shadow: 0 0 0 2px #1a1a1a; }
+        .git-history__item:first-child .git-history__dot { background: #d4b35a; box-shadow: 0 0 0 2px #1a1a1a, 0 0 8px rgba(212, 179, 90, 0.5); }
         .git-history__hash { color: #8b6914; font-size: 0.7rem; letter-spacing: 0.02em; }
-
         .git-history__content { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-
-        .git-history__msg {
-            color: #e5e5e5;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
+        .git-history__msg { color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .git-history__meta { color: rgba(255, 255, 255, 0.45); font-size: 0.68rem; }
 
-        /* ===== Студенческий вид ===== */
         .student-card { display: flex; flex-direction: column; gap: var(--space-md); }
-
-        .student-header {
-            display: flex;
-            align-items: center;
-            gap: var(--space-md);
-            padding: var(--space-md);
-            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
-            border: 1px solid rgba(139, 105, 20, 0.2);
-            border-left: 4px solid var(--color-accent);
-        }
-
-        .student-header__avatar {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            background: var(--color-accent);
-            color: #fff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: var(--font-serif);
-            font-size: 1.5rem;
-            font-weight: 600;
-            flex-shrink: 0;
-        }
-
+        .student-header { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md); background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%); border: 1px solid rgba(139, 105, 20, 0.2); border-left: 4px solid var(--color-accent); }
+        .student-header__avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--color-accent); color: #fff; display: flex; align-items: center; justify-content: center; font-family: var(--font-serif); font-size: 1.5rem; font-weight: 600; flex-shrink: 0; }
         .student-header__info { flex: 1; }
         .student-header__name { font-family: var(--font-serif); font-size: 1.4rem; font-weight: 500; line-height: 1.1; }
         .student-header__meta { font-size: 0.82rem; color: var(--color-tertiary); margin-top: 4px; }
         .student-header__topic { font-size: 0.9rem; color: var(--color-accent-dark); margin-top: 6px; font-weight: 500; }
 
-        .student-phases {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-        }
-
+        .student-phases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
         @media (max-width: 900px) { .student-phases { grid-template-columns: repeat(2, 1fr); } }
-
-        .student-phase-step {
-            position: relative;
-            padding: 14px 14px 14px 46px;
-            background: #fff;
-            border: 1px solid rgba(26, 26, 26, 0.12);
-            border-left: 4px solid rgba(26, 26, 26, 0.2);
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            min-height: 96px;
-        }
-
-        .student-phase-step__num {
-            position: absolute;
-            left: 10px;
-            top: 14px;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            background: rgba(26, 26, 26, 0.06);
-            color: var(--color-tertiary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: var(--font-serif);
-            font-weight: 600;
-            font-size: 0.95rem;
-        }
-
+        .student-phase-step { position: relative; padding: 14px 14px 14px 46px; background: #fff; border: 1px solid rgba(26, 26, 26, 0.12); border-left: 4px solid rgba(26, 26, 26, 0.2); display: flex; flex-direction: column; gap: 6px; min-height: 96px; }
+        .student-phase-step__num { position: absolute; left: 10px; top: 14px; width: 28px; height: 28px; border-radius: 50%; background: rgba(26, 26, 26, 0.06); color: var(--color-tertiary); display: flex; align-items: center; justify-content: center; font-family: var(--font-serif); font-weight: 600; font-size: 0.95rem; }
         .student-phase-step__name { font-weight: 500; font-size: 0.9rem; line-height: 1.25; }
         .student-phase-step__status { margin-top: auto; font-size: 0.72rem; font-weight: 500; padding: 2px 8px; align-self: flex-start; border: 1px solid; border-radius: 2px; }
-
         .student-phase-step--done { border-left-color: #16a34a; }
         .student-phase-step--done .student-phase-step__num { background: rgba(22, 163, 74, 0.15); color: #15803d; }
         .student-phase-step--done .student-phase-step__status { border-color: #16a34a; color: #15803d; }
-
         .student-phase-step--current { border-left-color: #2563eb; box-shadow: 0 0 0 1px #2563eb inset, 0 4px 12px rgba(37, 99, 235, 0.08); }
         .student-phase-step--current .student-phase-step__num { background: #2563eb; color: #fff; }
         .student-phase-step--current .student-phase-step__status { border-color: #2563eb; color: #1d4ed8; }
-
         .student-phase-step--pending { opacity: 0.7; }
         .student-phase-step--pending .student-phase-step__status { border-color: rgba(26, 26, 26, 0.2); color: var(--color-tertiary); }
 
-        /* ===== Дашборд руководителя ===== */
-        .kpi-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: var(--space-sm);
-            margin-bottom: var(--space-md);
-        }
-
-        .kpi-card {
-            position: relative;
-            padding: 16px 18px;
-            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
-            border: 1px solid rgba(139, 105, 20, 0.15);
-            border-left: 3px solid var(--color-accent);
-            overflow: hidden;
-            transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
-        }
-
+        .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-sm); margin-bottom: var(--space-md); }
+        .kpi-card { position: relative; padding: 16px 18px; background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%); border: 1px solid rgba(139, 105, 20, 0.15); border-left: 3px solid var(--color-accent); overflow: hidden; transition: transform 0.2s ease-out, box-shadow 0.2s ease-out; }
         .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(139, 105, 20, 0.12); }
-
-        .kpi-card::after {
-            content: '';
-            position: absolute;
-            right: -30px;
-            bottom: -30px;
-            width: 90px;
-            height: 90px;
-            border-radius: 50%;
-            background: radial-gradient(circle, rgba(139, 105, 20, 0.08) 0%, transparent 70%);
-        }
-
+        .kpi-card::after { content: ''; position: absolute; right: -30px; bottom: -30px; width: 90px; height: 90px; border-radius: 50%; background: radial-gradient(circle, rgba(139, 105, 20, 0.08) 0%, transparent 70%); }
         .kpi-card__label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-tertiary); margin-bottom: 8px; position: relative; z-index: 1; }
         .kpi-card__value { font-family: var(--font-serif); font-size: 2.2rem; font-weight: 600; color: var(--color-primary); line-height: 1; margin-bottom: 6px; position: relative; z-index: 1; }
         .kpi-card__hint { font-size: 0.72rem; color: var(--color-accent-dark); position: relative; z-index: 1; }
 
-        .dash-toolbar {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            align-items: center;
-            padding: 10px 0;
-            margin-bottom: var(--space-md);
-            border-bottom: 1px solid rgba(26, 26, 26, 0.08);
-        }
-
+        .dash-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 0; margin-bottom: var(--space-md); border-bottom: 1px solid rgba(26, 26, 26, 0.08); }
         .dash-toolbar__group { display: flex; align-items: center; gap: 4px; }
         .dash-toolbar__label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-tertiary); margin-right: 4px; }
-
-        .dash-toolbar__btn {
-            padding: 5px 11px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            border: 1px solid rgba(26, 26, 26, 0.15);
-            background: #fff;
-            color: var(--color-secondary);
-            cursor: pointer;
-            font-family: var(--font-sans);
-            transition: 0.15s ease-out;
-        }
-
+        .dash-toolbar__btn { padding: 5px 11px; font-size: 0.75rem; font-weight: 500; border: 1px solid rgba(26, 26, 26, 0.15); background: #fff; color: var(--color-secondary); cursor: pointer; font-family: var(--font-sans); transition: 0.15s ease-out; }
         .dash-toolbar__btn:hover { background: rgba(139, 105, 20, 0.08); color: var(--color-primary); }
         .dash-toolbar__btn.is-active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
-
-        .filter-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            background: rgba(139, 105, 20, 0.14);
-            color: var(--color-accent-dark);
-            border-radius: 14px;
-            font-size: 0.72rem;
-            font-weight: 500;
-            cursor: pointer;
-            margin-left: auto;
-            transition: 0.15s;
-        }
-
+        .filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: rgba(139, 105, 20, 0.14); color: var(--color-accent-dark); border-radius: 14px; font-size: 0.72rem; font-weight: 500; cursor: pointer; margin-left: auto; transition: 0.15s; }
         .filter-chip:hover { background: rgba(139, 105, 20, 0.24); }
         .filter-chip__x { font-size: 0.95rem; line-height: 1; opacity: 0.7; }
 
-        .dash-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            grid-auto-rows: minmax(260px, auto);
-            gap: var(--space-md);
-            flex: 1;
-        }
-
-        .dash-card {
-            padding: var(--space-md);
-            border: 1px solid rgba(26, 26, 26, 0.1);
-            background: var(--color-white);
-            display: flex;
-            flex-direction: column;
-            min-height: 260px;
-            min-width: 0;
-        }
-
+        .dash-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(260px, auto); gap: var(--space-md); flex: 1; }
+        .dash-card { padding: var(--space-md); border: 1px solid rgba(26, 26, 26, 0.1); background: var(--color-white); display: flex; flex-direction: column; min-height: 260px; min-width: 0; }
         .dash-card--wide { grid-column: span 2; }
         .dash-card--map { grid-column: span 3; min-height: 500px; }
-
-        .dash-card__title {
-            font-family: var(--font-serif);
-            font-size: 1.15rem;
-            margin-bottom: var(--space-sm);
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 8px;
-        }
-
+        .dash-card__title { font-family: var(--font-serif); font-size: 1.15rem; margin-bottom: var(--space-sm); display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
         .dash-card__hint { font-family: var(--font-sans); font-size: 0.72rem; color: var(--color-tertiary); font-weight: 400; }
-
         .dash-card__body { flex: 1; min-height: 200px; position: relative; }
         .dash-card canvas { width: 100% !important; height: 100% !important; cursor: pointer; display: block; }
 
-        .russia-map-wrap {
-            position: relative;
-            flex: 1;
-            min-height: 420px;
-            background: linear-gradient(180deg, #fbfaf6 0%, #eee9dc 100%);
-            border: 1px solid rgba(26, 26, 26, 0.08);
-            overflow: hidden;
-        }
-
+        .russia-map-wrap { position: relative; flex: 1; min-height: 420px; background: linear-gradient(180deg, #fbfaf6 0%, #eee9dc 100%); border: 1px solid rgba(26, 26, 26, 0.08); overflow: hidden; }
         .russia-map { width: 100%; height: 100%; display: block; }
         .russia-map .map-grid { stroke: rgba(26, 26, 26, 0.06); stroke-width: 0.6; stroke-dasharray: 2 3; }
         .russia-map .map-grid-label { font-family: var(--font-sans); font-size: 8px; fill: rgba(26, 26, 26, 0.25); letter-spacing: 0.05em; }
-
-        .russia-outline {
-            fill: url(#map-fill);
-            stroke: rgba(139, 105, 20, 0.45);
-            stroke-width: 1.8;
-            stroke-linejoin: round;
-            stroke-linecap: round;
-            filter: url(#map-glow);
-        }
-
+        .russia-outline { fill: url(#map-fill); stroke: rgba(139, 105, 20, 0.45); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; filter: url(#map-glow); }
         .uni-point { cursor: pointer; transition: opacity 0.25s ease-out; }
         .uni-point.is-dimmed { opacity: 0.15; }
-
         .uni-point__dot { transition: r 0.25s ease-out, filter 0.25s, fill 0.3s; transform-origin: center; }
         .uni-point__halo { transition: opacity 0.3s, r 0.3s, fill 0.3s; }
         .uni-point__pulse { fill: none; stroke-width: 2; opacity: 0; transition: opacity 0.2s, stroke 0.3s; pointer-events: none; }
-
-        .uni-point__label {
-            font-family: var(--font-sans);
-            font-size: 11px;
-            font-weight: 600;
-            fill: var(--color-secondary);
-            paint-order: stroke;
-            stroke: #fff;
-            stroke-width: 3px;
-            stroke-linejoin: round;
-            pointer-events: none;
-        }
-
+        .uni-point__label { font-family: var(--font-sans); font-size: 11px; font-weight: 600; fill: var(--color-secondary); paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
         .uni-point.is-dimmed .uni-point__label { opacity: 0.2; }
         .uni-point:hover .uni-point__dot { r: 15; filter: brightness(1.1); }
         .uni-point:hover .uni-point__halo { opacity: 0.28; r: 26; }
         .uni-point.is-selected .uni-point__dot { r: 16; stroke-width: 3; }
         .uni-point.is-selected .uni-point__halo { opacity: 0.35; r: 30; }
         .uni-point.is-selected .uni-point__pulse { opacity: 0.55; animation: pulse-marker 2s ease-out infinite; }
+        @keyframes pulse-marker { 0% { r: 16; opacity: 0.55; } 100% { r: 34; opacity: 0; } }
 
-        @keyframes pulse-marker {
-            0%   { r: 16; opacity: 0.55; }
-            100% { r: 34; opacity: 0; }
-        }
-
-        .map-info {
-            position: absolute;
-            top: 16px;
-            left: 16px;
-            min-width: 200px;
-            padding: 10px 14px;
-            background: rgba(255, 255, 255, 0.97);
-            border-left: 3px solid var(--color-accent);
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
-            font-family: var(--font-sans);
-            font-size: 0.8rem;
-            color: var(--color-primary);
-            opacity: 0;
-            transform: translateY(-6px);
-            transition: opacity 0.2s, transform 0.2s;
-            pointer-events: none;
-            z-index: 10;
-        }
-
+        .map-info { position: absolute; top: 16px; left: 16px; min-width: 200px; padding: 10px 14px; background: rgba(255, 255, 255, 0.97); border-left: 3px solid var(--color-accent); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1); font-family: var(--font-sans); font-size: 0.8rem; color: var(--color-primary); opacity: 0; transform: translateY(-6px); transition: opacity 0.2s, transform 0.2s; pointer-events: none; z-index: 10; }
         .map-info.is-visible { opacity: 1; transform: translateY(0); }
         .map-info__phase { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
         .map-info__name { font-family: var(--font-serif); font-size: 1.05rem; font-weight: 500; line-height: 1.2; margin-bottom: 4px; }
         .map-info__projects { font-size: 0.72rem; color: var(--color-tertiary); }
 
-        .map-legend {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem var(--space-md);
-            margin-top: var(--space-sm);
-            padding-top: var(--space-sm);
-            border-top: 1px solid rgba(26, 26, 26, 0.08);
-        }
-
-        .map-legend__item {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            font-size: 0.75rem;
-            color: var(--color-secondary);
-            cursor: pointer;
-            padding: 2px 6px;
-            border-radius: 10px;
-        }
-
+        .map-legend { display: flex; flex-wrap: wrap; gap: 0.5rem var(--space-md); margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid rgba(26, 26, 26, 0.08); }
+        .map-legend__item { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--color-secondary); cursor: pointer; padding: 2px 6px; border-radius: 10px; }
         .map-legend__item:hover { background: rgba(139, 105, 20, 0.1); }
         .map-legend__item.is-active { background: rgba(139, 105, 20, 0.2); font-weight: 600; }
         .map-legend__dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.15); }
 
-        @media (max-width: 1100px) {
-            .dash-grid { grid-template-columns: 1fr 1fr; }
-            .dash-card--wide { grid-column: span 2; }
-            .dash-card--map { grid-column: span 2; }
+        /* ===== Родительские блоки ===== */
+        .parent-child-picker {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            padding: 10px 14px; background: var(--color-light);
+            border: 1px solid rgba(26, 26, 26, 0.08);
+            margin-bottom: var(--space-md);
         }
 
-        @media (max-width: 720px) {
-            .dash-grid { grid-template-columns: 1fr; }
-            .dash-card--wide, .dash-card--map { grid-column: span 1; }
-        }
+        .parent-child-picker__label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-tertiary); }
+        .parent-child-picker select { padding: 6px 10px; border: 1px solid rgba(26, 26, 26, 0.15); background: #fff; font-family: var(--font-sans); font-size: 0.85rem; }
 
+        .bad-marks-banner {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 16px; margin-bottom: var(--space-sm);
+            background: #fef2f2;
+            border-left: 4px solid #dc2626;
+            color: #7f1d1d;
+            font-size: 0.88rem;
+            flex-wrap: wrap;
+        }
+        .bad-marks-banner__icon { font-size: 1.3rem; flex-shrink: 0; }
+        .bad-marks-banner__body { flex: 1; }
+        .bad-marks-banner__list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+        .bad-marks-banner__pill {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 3px 10px; background: #fff;
+            border: 1px solid rgba(220, 38, 38, 0.3);
+            border-radius: 12px;
+            font-size: 0.75rem; font-weight: 500;
+            color: #7f1d1d;
+        }
+        .bad-marks-banner__pill strong { color: #dc2626; font-weight: 700; }
+
+        .parent-note-card {
+            display: flex; flex-direction: column; gap: 4px;
+            padding: 10px 12px;
+            background: #fffbeb;
+            border-left: 3px solid #d97706;
+            font-size: 0.82rem;
+            color: #78350f;
+        }
+        .parent-note-card__meta { font-size: 0.7rem; color: #92400e; opacity: 0.8; }
+
+        .parent-visits-chip {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.7rem; font-weight: 600;
+            background: rgba(139, 105, 20, 0.12); color: var(--color-accent-dark);
+            white-space: nowrap;
+        }
+        .parent-visits-chip--active { background: rgba(22, 163, 74, 0.15); color: #15803d; }
+        .parent-visits-chip--low    { background: rgba(217, 119, 6, 0.15); color: #b45309; }
+        .parent-visits-chip--cold   { background: rgba(220, 38, 38, 0.1);  color: #b91c1c; }
+        .parent-visits-chip--trend-up   { color: #16a34a; }
+        .parent-visits-chip--trend-down { color: #dc2626; }
+
+        .journal-parent-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #16a34a;
+            margin-left: 6px;
+            vertical-align: middle;
+            box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
+        }
+        .journal-parent-badge--low  { background: #d97706; box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15); }
+        .journal-parent-badge--cold { background: #dc2626; box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15); }
+
+        @media (max-width: 1100px) { .dash-grid { grid-template-columns: 1fr 1fr; } .dash-card--wide { grid-column: span 2; } .dash-card--map { grid-column: span 2; } }
+        @media (max-width: 720px) { .dash-grid { grid-template-columns: 1fr; } .dash-card--wide, .dash-card--map { grid-column: span 1; } }
         @media (max-width: 900px) { .mainnav { overflow-x: auto; } }
     </style>
 </head>
@@ -2320,26 +1273,18 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
     <div class="auth-card">
         <h1 class="auth-card__brand">Кладезь</h1>
         <p class="auth-card__subtitle">CRM «ИТ Школа РТК» — вход в систему</p>
-
-        <?php if ($error !== ''): ?>
-            <div class="auth-error"><?= e($error) ?></div>
-        <?php endif; ?>
-
+        <?php if ($error !== ''): ?><div class="auth-error"><?= e($error) ?></div><?php endif; ?>
         <form class="auth-form" method="post" action="index.php">
             <label for="login">Логин</label>
-            <input type="text" id="login" name="login" autocomplete="username" autofocus
-                   value="<?= e((string) ($_POST['login'] ?? '')) ?>">
-
+            <input type="text" id="login" name="login" autocomplete="username" autofocus value="<?= e((string) ($_POST['login'] ?? '')) ?>">
             <label for="password">Пароль</label>
             <input type="password" id="password" name="password" autocomplete="current-password">
-
             <label for="role">Роль</label>
             <select id="role" name="role">
                 <?php foreach ($allRoles as $role): ?>
                     <option value="<?= e($role['code']) ?>"><?= e($role['name']) ?></option>
                 <?php endforeach; ?>
             </select>
-
             <button type="submit">Войти</button>
         </form>
     </div>
@@ -2353,35 +1298,27 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             <div class="topbar__user">
                 <div class="role-switch" role="tablist" aria-label="Переключение роли">
                     <div class="role-switch__row">
-                        <a class="role-switch__btn <?= $viewRole === 'supervisor' ? 'active' : '' ?>"
-                           role="tab"
-                           aria-selected="<?= $viewRole === 'supervisor' ? 'true' : 'false' ?>"
-                           href="?role=supervisor">
+                        <a class="role-switch__btn <?= $viewRole === 'supervisor' ? 'active' : '' ?>" role="tab" aria-selected="<?= $viewRole === 'supervisor' ? 'true' : 'false' ?>" href="?role=supervisor">
                             <span class="role-switch__emoji" aria-hidden="true">🧭</span>
                             <span class="role-switch__label">Руководитель</span>
                         </a>
-                        <a class="role-switch__btn <?= $viewRole === 'manager' ? 'active' : '' ?>"
-                           role="tab"
-                           aria-selected="<?= $viewRole === 'manager' ? 'true' : 'false' ?>"
-                           href="?role=manager<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
+                        <a class="role-switch__btn <?= $viewRole === 'manager' ? 'active' : '' ?>" role="tab" aria-selected="<?= $viewRole === 'manager' ? 'true' : 'false' ?>" href="?role=manager<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
                             <span class="role-switch__emoji" aria-hidden="true">📋</span>
                             <span class="role-switch__label"><?= e($managerLabel) ?> · Менеджер</span>
                         </a>
                     </div>
                     <div class="role-switch__row">
-                        <a class="role-switch__btn <?= $viewRole === 'university' ? 'active' : '' ?>"
-                           role="tab"
-                           aria-selected="<?= $viewRole === 'university' ? 'true' : 'false' ?>"
-                           href="?role=university<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
+                        <a class="role-switch__btn <?= $viewRole === 'university' ? 'active' : '' ?>" role="tab" aria-selected="<?= $viewRole === 'university' ? 'true' : 'false' ?>" href="?role=university<?= $viewUniId ? '&uni_id=' . (int) $viewUniId : '' ?>">
                             <span class="role-switch__emoji" aria-hidden="true">🎓</span>
                             <span class="role-switch__label">Представитель Вуза</span>
                         </a>
-                        <a class="role-switch__btn <?= $viewRole === 'student' ? 'active' : '' ?>"
-                           role="tab"
-                           aria-selected="<?= $viewRole === 'student' ? 'true' : 'false' ?>"
-                           href="?role=student<?= $viewStudentId ? '&student_id=' . (int) $viewStudentId : '' ?>">
+                        <a class="role-switch__btn <?= $viewRole === 'student' ? 'active' : '' ?>" role="tab" aria-selected="<?= $viewRole === 'student' ? 'true' : 'false' ?>" href="?role=student<?= $viewStudentId ? '&student_id=' . (int) $viewStudentId : '' ?>">
                             <span class="role-switch__emoji" aria-hidden="true">🎒</span>
                             <span class="role-switch__label">Студент</span>
+                        </a>
+                        <a class="role-switch__btn <?= $viewRole === 'parent' ? 'active' : '' ?>" role="tab" aria-selected="<?= $viewRole === 'parent' ? 'true' : 'false' ?>" href="?role=parent<?= $viewParentChildId ? '&child_id=' . (int) $viewParentChildId : '' ?>">
+                            <span class="role-switch__emoji" aria-hidden="true">👪</span>
+                            <span class="role-switch__label">Родитель</span>
                         </a>
                     </div>
                 </div>
@@ -2401,7 +1338,6 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         <main class="content">
             <?php if ($viewRole === 'manager'): ?>
                 <div class="workspace">
-
                     <?php if ($managerNotification !== null): ?>
                         <div class="notification notification--<?= $managerNotification['type'] === 'confirmed' ? 'success' : 'danger' ?>">
                             <span class="notification__icon"><?= $managerNotification['type'] === 'confirmed' ? '✓' : '✕' ?></span>
@@ -2426,7 +1362,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                 </p>
                                 <?php if ($currentPhaseNum === 11): ?>
                                     <span class="panel__hint panel__hint--phase">
-                                        👨‍🎓 Проект в фазе «Ведение занятий» — ниже доступна статистика студентов
+                                        👨‍🎓 Проект в фазе «Ведение занятий» — ниже доступна статистика студентов и активность родителей
                                     </span>
                                 <?php endif; ?>
                             </div>
@@ -2446,8 +1382,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                         <?php if ($item['isCurrent']): ?><span class="wstep__flag">◆</span><?php endif; ?>
                                         <span class="wstep__name"><?= e($item['name']) ?></span>
                                         <span class="wstep__status"><?= e($item['stateLabel']) ?></span>
-                                        <span class="wstep__bar"
-                                              style="background-color: <?= e($item['color']) ?>33">
+                                        <span class="wstep__bar" style="background-color: <?= e($item['color']) ?>33">
                                             <span class="wstep__bar-fill" style="width: <?= (int) $item['fill'] ?>%; background-color: <?= e($item['color']) ?>"></span>
                                         </span>
                                     </div>
@@ -2465,6 +1400,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                         Классно-урочная и проектная работа по курсу
                                         «<?= e($currentProject['title']) ?>»
                                         · студентов: <?= count($mockStudents) ?>
+                                        · активность родителей в CRM видна справа от имени
                                     </p>
                                 </div>
                             </div>
@@ -2481,11 +1417,30 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                             </thead>
                                             <tbody>
                                                 <?php foreach ($mockStudents as $st): ?>
-                                                    <?php $history = $mockStudentHistories[(int) $st['id']] ?? []; ?>
+                                                    <?php
+                                                    $history = $mockStudentHistories[(int) $st['id']] ?? [];
+                                                    $pv = $parentVisitsMock[(int) $st['id']] ?? null;
+                                                    $chipCls = '';
+                                                    if ($pv !== null) {
+                                                        if ($pv['count'] >= 10) $chipCls = 'parent-visits-chip--active';
+                                                        elseif ($pv['count'] >= 5) $chipCls = 'parent-visits-chip--low';
+                                                        else $chipCls = 'parent-visits-chip--cold';
+                                                    }
+                                                    ?>
                                                     <tr>
                                                         <td class="student-name" title="<?= e($st['name']) ?>">
-                                                            <?= e($st['name']) ?>
-                                                            <span class="student-sub"><?= e($st['group']) ?></span>
+                                                            <span style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                                                <span>
+                                                                    <?= e($st['name']) ?>
+                                                                    <span class="student-sub"><?= e($st['group']) ?></span>
+                                                                </span>
+                                                                <?php if ($pv !== null): ?>
+                                                                    <span class="parent-visits-chip <?= $chipCls ?>" title="Активность родителя в CRM: <?= (int) $pv['count'] ?> визитов, последний <?= e($pv['last']) ?>">
+                                                                        👪 <?= (int) $pv['count'] ?>
+                                                                        <span class="parent-visits-chip--trend-<?= $pv['trend'][0] === '+' ? 'up' : ($pv['trend'][0] === '-' ? 'down' : 'up') ?>" style="font-size:0.65rem;"><?= e($pv['trend']) ?></span>
+                                                                    </span>
+                                                                <?php endif; ?>
+                                                            </span>
                                                         </td>
                                                         <td>
                                                             <?php if (empty($history)): ?>
@@ -2500,14 +1455,9 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                                                         $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
                                                                         ?>
                                                                         <?php if ($idx > 0): ?>
-                                                                            <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"
-                                                                                  title="<?= $isReturn ? 'Возврат к предыдущей фазе' : 'Переход к следующей фазе' ?>">
-                                                                                <?= $isReturn ? '↩' : '→' ?>
-                                                                            </span>
+                                                                            <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>" title="<?= $isReturn ? 'Возврат к предыдущей фазе' : 'Переход к следующей фазе' ?>"><?= $isReturn ? '↩' : '→' ?></span>
                                                                         <?php endif; ?>
-                                                                        <span class="phase-chip"
-                                                                              style="--phase-color: <?= e($sp['color']) ?>;"
-                                                                              title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
+                                                                        <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
                                                                             <span class="phase-chip__num"><?= (int) $sp['num'] ?></span>
                                                                             <?= e($sp['name']) ?>
                                                                             <span class="phase-chip__date"><?= e($h['date']) ?></span>
@@ -2524,7 +1474,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                     </div>
 
                                     <section class="legend" style="margin-top: var(--space-sm);">
-                                        <h3 class="legend__title">Легенда проектных фаз</h3>
+                                        <h3 class="legend__title">Легенда</h3>
                                         <div class="legend__items">
                                             <?php foreach ($studentPhases as $sp): ?>
                                                 <span class="legend__item">
@@ -2532,14 +1482,9 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                                     <?= (int) $sp['num'] ?>. <?= e($sp['name']) ?>
                                                 </span>
                                             <?php endforeach; ?>
-                                            <span class="legend__item">
-                                                <span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>
-                                                Возврат к предыдущей фазе
-                                            </span>
-                                            <span class="legend__item">
-                                                <span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>
-                                                Переход к следующей фазе
-                                            </span>
+                                            <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>Возврат</span>
+                                            <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>Переход</span>
+                                            <span class="legend__item"><span class="parent-visits-chip parent-visits-chip--active" style="margin:0;">👪 N</span>Активность родителя (N визитов)</span>
                                         </div>
                                     </section>
                                 </div>
@@ -2553,9 +1498,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                         <div class="git-history__list">
                                             <?php foreach ($mockGitHistory as $commit): ?>
                                                 <div class="git-history__item">
-                                                    <div class="git-history__graph">
-                                                        <span class="git-history__dot"></span>
-                                                    </div>
+                                                    <div class="git-history__graph"><span class="git-history__dot"></span></div>
                                                     <span class="git-history__hash"><?= e($commit['hash']) ?></span>
                                                     <div class="git-history__content">
                                                         <span class="git-history__msg"><?= e($commit['message']) ?></span>
@@ -2575,12 +1518,10 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                             <div>
                                 <h2 class="panel__title">Сетка проектов</h2>
                                 <p class="panel__subtitle">
-                                    Строки — ВУЗы, столбцы — ИТ-продукты. Клетки с взаимодействием — цветные
-                                    листочки с номером фазы.
+                                    Строки — ВУЗы, столбцы — ИТ-продукты. Клетки с взаимодействием — цветные листочки с номером фазы.
                                 </p>
                                 <span class="panel__hint">
-                                    ◆ Перетащите листок — рядом появятся карманы «Предыдущая» и «Следующая» фаза.
-                                    Фазы с 🔒 требуют подтверждения вуза.
+                                    ◆ Перетащите листок — рядом появятся карманы «Предыдущая» и «Следующая» фаза. Фазы с 🔒 требуют подтверждения вуза.
                                 </span>
                             </div>
                         </div>
@@ -2601,9 +1542,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                             <th title="<?= e($university['name']) ?>">
                                                 <span class="uni">
                                                     <?php if ($university['crest'] !== null): ?>
-                                                        <img class="uni__crest" src="<?= e($university['crest']) ?>"
-                                                             alt="Герб: <?= e($university['short']) ?>"
-                                                             onerror="this.outerHTML='&lt;span class=&quot;uni__initial&quot;&gt;<?= e($university['initial']) ?>&lt;/span&gt;'">
+                                                        <img class="uni__crest" src="<?= e($university['crest']) ?>" alt="Герб: <?= e($university['short']) ?>" onerror="this.outerHTML='&lt;span class=&quot;uni__initial&quot;&gt;<?= e($university['initial']) ?>&lt;/span&gt;'">
                                                     <?php else: ?>
                                                         <span class="uni__initial"><?= e($university['initial']) ?></span>
                                                     <?php endif; ?>
@@ -2619,52 +1558,26 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                                 $interactionId = $interactionIdMap[$uniId][$prodId] ?? null;
                                                 $isCurrent = $interactionId !== null && $interactionId === $currentProject['id'];
                                                 $isPending = $interactionId !== null && isset($pendingByProject[(int) $interactionId]);
-
                                                 $cellClasses = [];
-                                                if ($phase !== null && (int) $phase['num'] > 0) {
-                                                    $cellClasses[] = 'phase';
-                                                } else {
-                                                    $cellClasses[] = 'empty';
-                                                }
-                                                if ($interactionId !== null) {
-                                                    $cellClasses[] = 'clickable';
-                                                }
-                                                if ($isCurrent) {
-                                                    $cellClasses[] = 'is-current-project';
-                                                }
-                                                if ($isPending) {
-                                                    $cellClasses[] = 'is-pending';
-                                                }
+                                                if ($phase !== null && (int) $phase['num'] > 0) $cellClasses[] = 'phase';
+                                                else $cellClasses[] = 'empty';
+                                                if ($interactionId !== null) $cellClasses[] = 'clickable';
+                                                if ($isCurrent) $cellClasses[] = 'is-current-project';
+                                                if ($isPending) $cellClasses[] = 'is-pending';
                                                 $cellClass = implode(' ', $cellClasses);
-
                                                 $cellTitle = $university['name'] . ' · ' . $product['name'];
-                                                if ($phase !== null && (int) $phase['num'] > 0) {
-                                                    $cellTitle .= ' → ' . $phase['name'];
-                                                }
+                                                if ($phase !== null && (int) $phase['num'] > 0) $cellTitle .= ' → ' . $phase['name'];
                                                 ?>
                                                 <?php if ($interactionId !== null && $phase !== null && (int) $phase['num'] > 0): ?>
-                                                    <td class="<?= e($cellClass) ?>"
-                                                        title="<?= e($cellTitle) ?>"
+                                                    <td class="<?= e($cellClass) ?>" title="<?= e($cellTitle) ?>"
                                                         data-project="<?= (int) $interactionId ?>"
                                                         data-phase-id="<?= (int) $phase['id'] ?>"
                                                         data-phase-num="<?= (int) $phase['num'] ?>"
-                                                        draggable="true"
-                                                        tabindex="0"
-                                                        role="link"
-                                                        aria-label="<?= e($cellTitle) ?>">
-                                                        <span class="sticker-cell"
-                                                              style="--phase-color: <?= e($phase['color']) ?>;">
-                                                            <?= (int) $phase['num'] ?>
-                                                        </span>
+                                                        draggable="true" tabindex="0" role="link" aria-label="<?= e($cellTitle) ?>">
+                                                        <span class="sticker-cell" style="--phase-color: <?= e($phase['color']) ?>;"><?= (int) $phase['num'] ?></span>
                                                     </td>
                                                 <?php elseif ($interactionId !== null): ?>
-                                                    <td class="<?= e($cellClass) ?>"
-                                                        title="<?= e($cellTitle) ?>"
-                                                        data-project="<?= (int) $interactionId ?>"
-                                                        tabindex="0"
-                                                        role="link">
-                                                        —
-                                                    </td>
+                                                    <td class="<?= e($cellClass) ?>" title="<?= e($cellTitle) ?>" data-project="<?= (int) $interactionId ?>" tabindex="0" role="link">—</td>
                                                 <?php else: ?>
                                                     <td class="<?= e($cellClass) ?>" title="<?= e($cellTitle) ?>">—</td>
                                                 <?php endif; ?>
@@ -2692,26 +1605,14 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                 </div>
             <?php elseif ($viewRole === 'university'): ?>
                 <div class="workspace workspace--uni">
-
                     <?php if ($universityNotification !== null): ?>
                         <div class="notification notification--<?= $universityNotification['type'] === 'pending' ? 'pending' : 'info' ?>">
-                            <span class="notification__icon">
-                                <?= $universityNotification['type'] === 'pending' ? '⏳' : 'ℹ' ?>
-                            </span>
+                            <span class="notification__icon"><?= $universityNotification['type'] === 'pending' ? '⏳' : 'ℹ' ?></span>
                             <div class="notification__body"><?= e($universityNotification['message']) ?></div>
-
                             <?php if ($universityNotification['type'] === 'pending' && $pendingChange !== null): ?>
                                 <div class="notification__actions">
-                                    <form method="post" action="index.php?action=confirm_phase" style="display:inline;">
-                                        <button type="submit" class="notification__btn notification__btn--primary">
-                                            Подтвердить
-                                        </button>
-                                    </form>
-                                    <form method="post" action="index.php?action=reject_phase" style="display:inline;">
-                                        <button type="submit" class="notification__btn notification__btn--danger">
-                                            Отклонить
-                                        </button>
-                                    </form>
+                                    <form method="post" action="index.php?action=confirm_phase" style="display:inline;"><button type="submit" class="notification__btn notification__btn--primary">Подтвердить</button></form>
+                                    <form method="post" action="index.php?action=reject_phase" style="display:inline;"><button type="submit" class="notification__btn notification__btn--danger">Отклонить</button></form>
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -2721,20 +1622,13 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                         <div class="panel__head">
                             <div>
                                 <h2 class="panel__title">Рабочий процесс вуза</h2>
-                                <p class="panel__subtitle">
-                                    Все взаимодействия:
-                                    <strong><?= e($selectedUni['name'] ?? '—') ?></strong>
-                                    · проектов: <?= count($uniProjects) ?>
-                                </p>
+                                <p class="panel__subtitle">Все взаимодействия: <strong><?= e($selectedUni['name'] ?? '—') ?></strong> · проектов: <?= count($uniProjects) ?></p>
                             </div>
                             <label class="project-select">
                                 Вуз:
                                 <select onchange="location.href = 'index.php?role=university&uni_id=' + this.value;">
                                     <?php foreach ($universities as $u): ?>
-                                        <option value="<?= (int) $u['id'] ?>"
-                                            <?= (int) $u['id'] === $viewUniId ? 'selected' : '' ?>>
-                                            <?= e($u['short']) ?> — <?= e($u['name']) ?>
-                                        </option>
+                                        <option value="<?= (int) $u['id'] ?>" <?= (int) $u['id'] === $viewUniId ? 'selected' : '' ?>><?= e($u['short']) ?> — <?= e($u['name']) ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </label>
@@ -2742,24 +1636,17 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
 
                         <div class="workflow-scroll workflow-scroll--uni">
                             <?php if ($uniProjects === []): ?>
-                                <div class="uni-empty">
-                                    У выбранного вуза пока нет активных взаимодействий.
-                                </div>
+                                <div class="uni-empty">У выбранного вуза пока нет активных взаимодействий.</div>
                             <?php else: ?>
                                 <?php foreach ($uniProjects as $proj): ?>
                                     <div class="uni-workflow">
                                         <div class="uni-workflow__head">
-                                            <span class="uni-workflow__title" title="<?= e($proj['title']) ?>">
-                                                <?= e($proj['short']) ?>
-                                            </span>
+                                            <span class="uni-workflow__title" title="<?= e($proj['title']) ?>"><?= e($proj['short']) ?></span>
                                             <span class="uni-workflow__meta">
                                                 <?php if ($proj['phase'] !== null): ?>
-                                                    фаза <?= (int) $proj['phase']['num'] ?>
-                                                    «<?= e($proj['phase']['name']) ?>»
+                                                    фаза <?= (int) $proj['phase']['num'] ?> «<?= e($proj['phase']['name']) ?>»
                                                     <?php if (!empty($proj['phase']['requires_confirmation'])): ?> 🔒<?php endif; ?>
-                                                <?php else: ?>
-                                                    фаза не задана
-                                                <?php endif; ?>
+                                                <?php else: ?>фаза не задана<?php endif; ?>
                                             </span>
                                         </div>
                                         <div class="workflow-track workflow-track--compact">
@@ -2768,17 +1655,13 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                                 $stateClass = 'wstep--' . $item['state'];
                                                 $sideClass = $item['side'] === 'both' ? ' wstep__side--both' : '';
                                                 ?>
-                                                <div class="wstep <?= $stateClass ?><?= $item['isCurrent'] ? ' current' : '' ?>"
-                                                     title="<?= e($item['name']) ?> · <?= e($item['sideLabel']) ?> · <?= e($item['stateLabel']) ?>">
+                                                <div class="wstep <?= $stateClass ?><?= $item['isCurrent'] ? ' current' : '' ?>" title="<?= e($item['name']) ?> · <?= e($item['sideLabel']) ?> · <?= e($item['stateLabel']) ?>">
                                                     <span class="wstep__num"><?= (int) $item['num'] ?></span>
                                                     <span class="wstep__side<?= $sideClass ?>"><?= e($item['side']) ?></span>
                                                     <?php if ($item['isCurrent']): ?><span class="wstep__flag">◆</span><?php endif; ?>
                                                     <span class="wstep__name"><?= e($item['name']) ?></span>
                                                     <span class="wstep__status"><?= e($item['stateLabel']) ?></span>
-                                                    <span class="wstep__bar"
-                                                          style="background-color: <?= e($item['color']) ?>33">
-                                                        <span class="wstep__bar-fill" style="width: <?= (int) $item['fill'] ?>%; background-color: <?= e($item['color']) ?>"></span>
-                                                    </span>
+                                                    <span class="wstep__bar" style="background-color: <?= e($item['color']) ?>33"><span class="wstep__bar-fill" style="width: <?= (int) $item['fill'] ?>%; background-color: <?= e($item['color']) ?>"></span></span>
                                                 </div>
                                             <?php endforeach; ?>
                                         </div>
@@ -2788,45 +1671,28 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                         </div>
                     </section>
 
-                    <!-- ===== Вкладки: Проект | Журнал ===== -->
                     <section class="panel panel--tabs">
                         <div class="tabs" role="tablist">
-                            <button class="tab is-active" data-tab="project" role="tab" aria-selected="true">
-                                📋 Проект
-                            </button>
-                            <button class="tab" data-tab="journal" role="tab" aria-selected="false">
-                                📓 Журнал
-                            </button>
+                            <button class="tab is-active" data-tab="project" role="tab" aria-selected="true">📋 Проект</button>
+                            <button class="tab" data-tab="journal" role="tab" aria-selected="false">📓 Журнал</button>
                         </div>
 
-                        <!-- ===== Вкладка «Проект» ===== -->
                         <div class="tab-content is-active" data-tab-content="project" role="tabpanel">
                             <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap: var(--space-sm); margin-bottom: var(--space-sm);">
                                 <div>
                                     <h2 class="panel__title" style="font-size:1.2rem;">История проектных фаз студентов</h2>
-                                    <p class="panel__subtitle">
-                                        Каждый студент проходит свой путь по фазам.
-                                        Возможны возвраты к предыдущим фазам (↩) — например, доработка после замечаний.
-                                    </p>
+                                    <p class="panel__subtitle">Возможны возвраты к предыдущим фазам (↩) — например, доработка после замечаний.</p>
                                 </div>
                             </div>
 
                             <div class="phase-timeline-wrap">
                                 <table class="students-timeline">
-                                    <thead>
-                                        <tr>
-                                            <th>Студент</th>
-                                            <th>Хронология фаз</th>
-                                        </tr>
-                                    </thead>
+                                    <thead><tr><th>Студент</th><th>Хронология фаз</th></tr></thead>
                                     <tbody>
                                         <?php foreach ($mockStudents as $st): ?>
                                             <?php $history = $mockStudentHistories[(int) $st['id']] ?? []; ?>
                                             <tr>
-                                                <td class="student-name" title="<?= e($st['name']) ?>">
-                                                    <?= e($st['name']) ?>
-                                                    <span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '' ? ' · ' . e($st['topic']) : '' ?></span>
-                                                </td>
+                                                <td class="student-name" title="<?= e($st['name']) ?>"><?= e($st['name']) ?><span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '' ? ' · ' . e($st['topic']) : '' ?></span></td>
                                                 <td>
                                                     <?php if (empty($history)): ?>
                                                         <span class="phase-timeline-empty">Нет записей</span>
@@ -2840,17 +1706,10 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                                                 $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
                                                                 ?>
                                                                 <?php if ($idx > 0): ?>
-                                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"
-                                                                          title="<?= $isReturn ? 'Возврат к предыдущей фазе' : 'Переход к следующей фазе' ?>">
-                                                                        <?= $isReturn ? '↩' : '→' ?>
-                                                                    </span>
+                                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>" title="<?= $isReturn ? 'Возврат' : 'Переход' ?>"><?= $isReturn ? '↩' : '→' ?></span>
                                                                 <?php endif; ?>
-                                                                <span class="phase-chip"
-                                                                      style="--phase-color: <?= e($sp['color']) ?>;"
-                                                                      title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
-                                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span>
-                                                                    <?= e($sp['name']) ?>
-                                                                    <span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                                <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
+                                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
                                                                 </span>
                                                                 <?php $prevNum = (int) $h['num']; ?>
                                                             <?php endforeach; ?>
@@ -2867,40 +1726,32 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                 <h3 class="legend__title">Легенда проектных фаз</h3>
                                 <div class="legend__items">
                                     <?php foreach ($studentPhases as $sp): ?>
-                                        <span class="legend__item">
-                                            <span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span>
-                                            <?= (int) $sp['num'] ?>. <?= e($sp['name']) ?>
-                                        </span>
+                                        <span class="legend__item"><span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span><?= (int) $sp['num'] ?>. <?= e($sp['name']) ?></span>
                                     <?php endforeach; ?>
-                                    <span class="legend__item">
-                                        <span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>
-                                        Возврат к предыдущей фазе
-                                    </span>
-                                    <span class="legend__item">
-                                        <span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>
-                                        Переход к следующей фазе
-                                    </span>
+                                    <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>Возврат</span>
+                                    <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>Переход</span>
                                 </div>
                             </section>
                         </div>
 
-                        <!-- ===== Вкладка «Журнал» ===== -->
                         <div class="tab-content" data-tab-content="journal" role="tabpanel">
                             <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap: var(--space-sm); margin-bottom: var(--space-sm);">
                                 <div>
                                     <h2 class="panel__title" style="font-size:1.2rem;">Журнал занятий</h2>
                                     <p class="panel__subtitle">
-                                        Классическая классно-урочная система. Клик по дате — тема урока и домашнее задание.
+                                        Клик по дате — тема урока и домашнее задание.
+                                        Клик по ячейке — заметка преподавателя.
+                                        Рядом с именем — активность родителя в CRM.
                                     </p>
                                 </div>
                                 <div class="legend" style="margin:0; padding:6px 12px; background:rgba(139,105,20,0.06);">
                                     <div class="legend__items" style="gap:0.5rem var(--space-md);">
-                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-5">5</span> отлично</span>
-                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-4">4</span> хорошо</span>
-                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-3">3</span> удовл.</span>
-                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-2">2</span> неуд.</span>
-                                        <span class="legend__item"><span class="journal-mark journal-mark--dot">·</span> был</span>
-                                        <span class="legend__item"><span class="journal-mark journal-mark--absent">н</span> отсутствовал</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-5">5</span>отлично</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-4">4</span>хорошо</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-3">3</span>удовл.</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-2">2</span>неуд.</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--dot">·</span>был</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--absent">н</span>отсутствовал</span>
                                     </div>
                                 </div>
                             </div>
@@ -2917,9 +1768,23 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                     </thead>
                                     <tbody>
                                         <?php foreach ($mockStudents as $st): ?>
-                                            <?php $sid = (int) $st['id']; ?>
+                                            <?php
+                                            $sid = (int) $st['id'];
+                                            $pv = $parentVisitsMock[$sid] ?? null;
+                                            $badgeCls = '';
+                                            if ($pv !== null) {
+                                                if ($pv['count'] >= 10) $badgeCls = '';
+                                                elseif ($pv['count'] >= 5) $badgeCls = 'journal-parent-badge--low';
+                                                else $badgeCls = 'journal-parent-badge--cold';
+                                            }
+                                            ?>
                                             <tr data-student="<?= $sid ?>">
-                                                <td title="<?= e($st['name']) ?>"><?= e($st['name']) ?></td>
+                                                <td title="<?= e($st['name']) ?>">
+                                                    <?= e($st['name']) ?>
+                                                    <?php if ($pv !== null): ?>
+                                                        <span class="journal-parent-badge <?= $badgeCls ?>" title="Родитель в CRM: <?= (int) $pv['count'] ?> визитов, последний <?= e($pv['last']) ?>"></span>
+                                                    <?php endif; ?>
+                                                </td>
                                                 <?php foreach ($journalDates as $i => $d): ?>
                                                     <?php
                                                     $mark = $journalMarks[$sid][$i] ?? '';
@@ -2930,8 +1795,11 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                                     elseif ($mark === '2') $markClass = 'journal-mark--grade-2';
                                                     elseif ($mark === '·') $markClass = 'journal-mark--dot';
                                                     elseif ($mark === 'н') $markClass = 'journal-mark--absent';
+                                                    $hasNote = isset($journalNotes[$sid][$i]);
                                                     ?>
-                                                    <td class="journal-cell" data-date-index="<?= (int) $i ?>">
+                                                    <td class="journal-cell <?= $hasNote ? 'has-note' : '' ?>"
+                                                        data-date-index="<?= (int) $i ?>"
+                                                        data-student-id="<?= $sid ?>">
                                                         <?php if ($mark !== ''): ?>
                                                             <span class="journal-mark <?= $markClass ?>"><?= e($mark) ?></span>
                                                         <?php else: ?>
@@ -2945,19 +1813,17 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                 </table>
                             </div>
 
-                            <!-- Панель урока -->
                             <div class="journal-lesson journal-lesson--empty" id="journal-lesson">
                                 <div class="journal-lesson__date" id="journal-lesson-date">Урок не выбран</div>
                                 <div class="journal-lesson__title" id="journal-lesson-topic">Выберите дату в журнале, чтобы увидеть тему урока и домашнее задание.</div>
                                 <div class="journal-lesson__homework" id="journal-lesson-homework"></div>
                             </div>
 
-                            <script type="application/json" id="journal-lessons-json">
-                                <?= json_encode($journalLessons, JSON_UNESCAPED_UNICODE) ?>
-                            </script>
-                            <script type="application/json" id="journal-dates-json">
-                                <?= json_encode($journalDates, JSON_UNESCAPED_UNICODE) ?>
-                            </script>
+                            <script type="application/json" id="journal-lessons-json"><?= json_encode($journalLessons, JSON_UNESCAPED_UNICODE) ?></script>
+                            <script type="application/json" id="journal-dates-json"><?= json_encode($journalDates, JSON_UNESCAPED_UNICODE) ?></script>
+                            <script type="application/json" id="journal-notes-json"><?= json_encode($journalNotes, JSON_UNESCAPED_UNICODE) ?></script>
+                            <script type="application/json" id="journal-students-json"><?= json_encode(array_map(function ($s) { return ['id' => $s['id'], 'name' => $s['name']]; }, $mockStudents), JSON_UNESCAPED_UNICODE) ?></script>
+                            <script type="application/json" id="journal-marks-json"><?= json_encode($journalMarks, JSON_UNESCAPED_UNICODE) ?></script>
                         </div>
                     </section>
                 </div>
@@ -2965,7 +1831,6 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                 <div class="workspace workspace--student">
                     <section class="panel" style="flex:1; min-height:0; display:flex; flex-direction:column; gap: var(--space-md);">
                         <div class="student-card">
-
                             <?php if ($selectedStudent === null): ?>
                                 <div class="uni-empty">Студент не найден.</div>
                             <?php else: ?>
@@ -2975,9 +1840,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                 $curStudentPhase = $lastEntry ? (int) $lastEntry['num'] : 0;
                                 ?>
                                 <div class="student-header">
-                                    <div class="student-header__avatar">
-                                        <?= e(mb_substr($selectedStudent['name'], 0, 1, 'UTF-8')) ?>
-                                    </div>
+                                    <div class="student-header__avatar"><?= e(mb_substr($selectedStudent['name'], 0, 1, 'UTF-8')) ?></div>
                                     <div class="student-header__info">
                                         <div class="student-header__name"><?= e($selectedStudent['name']) ?></div>
                                         <div class="student-header__meta">Группа <?= e($selectedStudent['group']) ?> · курс «<?= e($currentProject['title']) ?>»</div>
@@ -3018,16 +1881,10 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                                 $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
                                                 ?>
                                                 <?php if ($idx > 0): ?>
-                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>">
-                                                        <?= $isReturn ? '↩' : '→' ?>
-                                                    </span>
+                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"><?= $isReturn ? '↩' : '→' ?></span>
                                                 <?php endif; ?>
-                                                <span class="phase-chip"
-                                                      style="--phase-color: <?= e($sp['color']) ?>;"
-                                                      title="<?= e($h['note']) ?>">
-                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span>
-                                                    <?= e($sp['name']) ?>
-                                                    <span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($h['note']) ?>">
+                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
                                                 </span>
                                                 <?php $prevNum = (int) $h['num']; ?>
                                             <?php endforeach; ?>
@@ -3036,16 +1893,11 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                 <?php endif; ?>
 
                                 <div class="git-history">
-                                    <div class="git-history__header">
-                                        Git-история проекта
-                                        <span class="git-history__branch">⎇ main</span>
-                                    </div>
+                                    <div class="git-history__header">Git-история проекта <span class="git-history__branch">⎇ main</span></div>
                                     <div class="git-history__list">
                                         <?php foreach ($mockGitHistory as $commit): ?>
                                             <div class="git-history__item">
-                                                <div class="git-history__graph">
-                                                    <span class="git-history__dot"></span>
-                                                </div>
+                                                <div class="git-history__graph"><span class="git-history__dot"></span></div>
                                                 <span class="git-history__hash"><?= e($commit['hash']) ?></span>
                                                 <div class="git-history__content">
                                                     <span class="git-history__msg"><?= e($commit['message']) ?></span>
@@ -3059,46 +1911,209 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                         </div>
                     </section>
                 </div>
+            <?php elseif ($viewRole === 'parent'): ?>
+                <div class="workspace workspace--parent">
+                    <?php if ($parentChild === null): ?>
+                        <div class="uni-empty">Ребёнок не выбран.</div>
+                    <?php else: ?>
+                        <?php
+                        $cid = (int) $parentChild['id'];
+                        $childMarks = $journalMarks[$cid] ?? [];
+                        $childHistory = $mockStudentHistories[$cid] ?? [];
+                        $lastEntry = !empty($childHistory) ? end($childHistory) : null;
+                        $curStudentPhase = $lastEntry ? (int) $lastEntry['num'] : 0;
+                        $pv = $parentVisitsMock[$cid] ?? null;
+                        $myVisits = $_SESSION['parent_visits'][$cid] ?? [];
+                        $myTotalVisits = array_sum($myVisits);
+                        ?>
+
+                        <!-- Выбор ребёнка (если у родителя их несколько) -->
+                        <section class="parent-child-picker">
+                            <span class="parent-child-picker__label">Ребёнок:</span>
+                            <select onchange="location.href='index.php?role=parent&child_id=' + this.value;">
+                                <?php foreach ($mockStudents as $s): ?>
+                                    <option value="<?= (int) $s['id'] ?>" <?= (int) $s['id'] === $cid ? 'selected' : '' ?>><?= e($s['name']) ?> · <?= e($s['group']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <span style="flex:1"></span>
+                            <span class="parent-visits-chip parent-visits-chip--active" title="Ваши визиты в CRM (всего за сессию)">
+                                👪 Ваши визиты: <?= (int) $myTotalVisits ?>
+                            </span>
+                            <?php if ($pv !== null): ?>
+                                <span class="parent-visits-chip" title="Ваша активность за последний месяц">
+                                    За месяц: <?= (int) $pv['count'] ?> · последний: <?= e($pv['last']) ?>
+                                </span>
+                            <?php endif; ?>
+                        </section>
+
+                        <!-- Уведомления о плохих отметках -->
+                        <?php if (!empty($parentBadMarks)): ?>
+                            <div class="bad-marks-banner">
+                                <span class="bad-marks-banner__icon">⚠️</span>
+                                <div class="bad-marks-banner__body">
+                                    <strong>Внимание!</strong> У вашего ребёнка <?= count($parentBadMarks) ?> <?= count($parentBadMarks) === 1 ? 'низкая отметка' : 'низких отметок' ?> за последний период.
+                                    <div class="bad-marks-banner__list">
+                                        <?php foreach ($parentBadMarks as $bm): ?>
+                                            <span class="bad-marks-banner__pill">
+                                                <strong><?= e($bm['mark']) ?></strong>
+                                                <?= e($bm['date']) ?> — <?= e($bm['topic']) ?>
+                                            </span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php else: ?>
+                            <div class="notification notification--success">
+                                <span class="notification__icon">✓</span>
+                                <div class="notification__body">Низких отметок за период не зафиксировано. Так держать!</div>
+                            </div>
+                        <?php endif; ?>
+
+                        <!-- Карточка ребёнка -->
+                        <section class="panel">
+                            <div class="student-header">
+                                <div class="student-header__avatar"><?= e(mb_substr($parentChild['name'], 0, 1, 'UTF-8')) ?></div>
+                                <div class="student-header__info">
+                                    <div class="student-header__name"><?= e($parentChild['name']) ?></div>
+                                    <div class="student-header__meta">Группа <?= e($parentChild['group']) ?> · курс «<?= e($currentProject['title']) ?>»</div>
+                                    <?php if ($parentChild['topic'] !== ''): ?>
+                                        <div class="student-header__topic">Тема проекта: <?= e($parentChild['topic']) ?></div>
+                                    <?php else: ?>
+                                        <div class="student-header__topic" style="color:var(--color-tertiary);font-weight:400;">Тема проекта ещё не выбрана</div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Табы: Журнал | Проект -->
+                        <section class="panel panel--tabs">
+                            <div class="tabs" role="tablist">
+                                <button class="tab is-active" data-tab="journal" role="tab" aria-selected="true">📓 Журнал</button>
+                                <button class="tab" data-tab="project" role="tab" aria-selected="false">📋 Проект</button>
+                            </div>
+
+                            <!-- Журнал ребёнка -->
+                            <div class="tab-content is-active" data-tab-content="journal" role="tabpanel">
+                                <p class="panel__subtitle" style="margin-bottom: var(--space-sm);">
+                                    Оценки вашего ребёнка и заметки преподавателя. Клик по дате — тема урока и домашнее задание.
+                                </p>
+                                <div class="journal-wrap">
+                                    <table class="journal" id="journal-table-parent">
+                                        <thead>
+                                            <tr>
+                                                <th>Дата</th>
+                                                <th>Отметка</th>
+                                                <th>Заметка преподавателя</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($journalDates as $i => $d): ?>
+                                                <?php
+                                                $mark = $childMarks[$i] ?? '';
+                                                $markClass = '';
+                                                if ($mark === '5') $markClass = 'journal-mark--grade-5';
+                                                elseif ($mark === '4') $markClass = 'journal-mark--grade-4';
+                                                elseif ($mark === '3') $markClass = 'journal-mark--grade-3';
+                                                elseif ($mark === '2') $markClass = 'journal-mark--grade-2';
+                                                elseif ($mark === '·') $markClass = 'journal-mark--dot';
+                                                elseif ($mark === 'н') $markClass = 'journal-mark--absent';
+                                                $noteText = $journalNotes[$cid][$i] ?? '';
+                                                ?>
+                                                <tr data-date-index="<?= (int) $i ?>">
+                                                    <td style="font-weight: 600;"><?= e($d) ?></td>
+                                                    <td style="text-align: center;">
+                                                        <?php if ($mark !== ''): ?>
+                                                            <span class="journal-mark <?= $markClass ?>" style="font-size:1rem; min-width:32px; height:32px;"><?= e($mark) ?></span>
+                                                        <?php else: ?>
+                                                            <span style="color:rgba(26,26,26,0.15);">—</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                    <td style="text-align:left; font-size:0.82rem; color: var(--color-secondary);">
+                                                        <?= $noteText !== '' ? e($noteText) : '<span style="color:rgba(26,26,26,0.35);font-style:italic;">—</span>' ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="journal-lesson journal-lesson--empty" id="parent-journal-lesson">
+                                    <div class="journal-lesson__date" id="parent-journal-date">Урок не выбран</div>
+                                    <div class="journal-lesson__title" id="parent-journal-topic">Выберите дату в таблице, чтобы увидеть тему урока и домашнее задание.</div>
+                                    <div class="journal-lesson__homework" id="parent-journal-homework"></div>
+                                </div>
+
+                                <script type="application/json" id="parent-lessons-json"><?= json_encode($journalLessons, JSON_UNESCAPED_UNICODE) ?></script>
+                                <script type="application/json" id="parent-dates-json"><?= json_encode($journalDates, JSON_UNESCAPED_UNICODE) ?></script>
+                            </div>
+
+                            <!-- Проект ребёнка -->
+                            <div class="tab-content" data-tab-content="project" role="tabpanel">
+                                <p class="panel__subtitle" style="margin-bottom: var(--space-sm);">
+                                    Хронология проектных фаз вашего ребёнка. Возвраты к предыдущим фазам (↩) — это нормальный процесс доработки.
+                                </p>
+
+                                <?php if (empty($childHistory)): ?>
+                                    <div class="uni-empty">Пока нет записей по проекту.</div>
+                                <?php else: ?>
+                                    <div class="legend" style="margin: 0 0 var(--space-sm);">
+                                        <div class="phase-timeline">
+                                            <?php $prevNum = 0; ?>
+                                            <?php foreach ($childHistory as $idx => $h): ?>
+                                                <?php
+                                                $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
+                                                if (!$sp) continue;
+                                                $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
+                                                ?>
+                                                <?php if ($idx > 0): ?>
+                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"><?= $isReturn ? '↩' : '→' ?></span>
+                                                <?php endif; ?>
+                                                <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($h['note']) ?>">
+                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                </span>
+                                                <?php $prevNum = (int) $h['num']; ?>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+
+                                    <div class="student-phases">
+                                        <?php foreach ($studentPhases as $sp): ?>
+                                            <?php
+                                            $spNum = (int) $sp['num'];
+                                            $cls = 'student-phase-step--pending';
+                                            $label = 'Ожидает';
+                                            if ($spNum < $curStudentPhase) { $cls = 'student-phase-step--done'; $label = 'Завершён'; }
+                                            elseif ($spNum === $curStudentPhase) { $cls = 'student-phase-step--current'; $label = 'В работе'; }
+                                            ?>
+                                            <div class="student-phase-step <?= $cls ?>">
+                                                <div class="student-phase-step__num"><?= $spNum ?></div>
+                                                <div class="student-phase-step__name"><?= e($sp['name']) ?></div>
+                                                <div class="student-phase-step__status"><?= $label ?></div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </section>
+                    <?php endif; ?>
+                </div>
             <?php else: ?>
-                <!-- ============ ВИД РУКОВОДИТЕЛЯ ============ -->
+                <!-- ============ РУКОВОДИТЕЛЬ ============ -->
                 <div class="workspace workspace--dash">
                     <section class="panel panel--dashboard">
                         <div class="panel__head">
                             <div>
                                 <h2 class="panel__title">Дашборд руководителя</h2>
-                                <p class="panel__subtitle">
-                                    Фильтры периода и типа влияют на все графики и карту.
-                                    Клик по фазе, вузу или маркеру — cross-filtering.
-                                </p>
+                                <p class="panel__subtitle">Фильтры периода и типа влияют на все графики и карту. Клик по фазе, вузу или маркеру — cross-filtering.</p>
                             </div>
                         </div>
 
                         <div class="kpi-row">
-                            <div class="kpi-card">
-                                <div class="kpi-card__label">Всего проектов</div>
-                                <div class="kpi-card__value"><?= (int) $totalInteractions ?></div>
-                                <div class="kpi-card__hint">взаимодействий «вуз × продукт»</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-card__label">Активных</div>
-                                <div class="kpi-card__value"><?= (int) $activeInteractions ?></div>
-                                <div class="kpi-card__hint">в работе, не завершено</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-card__label">Вузов</div>
-                                <div class="kpi-card__value"><?= count($universities) ?></div>
-                                <div class="kpi-card__hint">партнёров в системе</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-card__label">ИТ-продуктов</div>
-                                <div class="kpi-card__value"><?= count($products) ?></div>
-                                <div class="kpi-card__hint">на витрине ИТ Школы</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-card__label">Средняя фаза</div>
-                                <div class="kpi-card__value"><?= e((string) $avgPhase) ?></div>
-                                <div class="kpi-card__hint">из <?= count($phases) - 1 ?> возможных</div>
-                            </div>
+                            <div class="kpi-card"><div class="kpi-card__label">Всего проектов</div><div class="kpi-card__value"><?= (int) $totalInteractions ?></div><div class="kpi-card__hint">взаимодействий «вуз × продукт»</div></div>
+                            <div class="kpi-card"><div class="kpi-card__label">Активных</div><div class="kpi-card__value"><?= (int) $activeInteractions ?></div><div class="kpi-card__hint">в работе, не завершено</div></div>
+                            <div class="kpi-card"><div class="kpi-card__label">Вузов</div><div class="kpi-card__value"><?= count($universities) ?></div><div class="kpi-card__hint">партнёров в системе</div></div>
+                            <div class="kpi-card"><div class="kpi-card__label">ИТ-продуктов</div><div class="kpi-card__value"><?= count($products) ?></div><div class="kpi-card__hint">на витрине ИТ Школы</div></div>
+                            <div class="kpi-card"><div class="kpi-card__label">Средняя фаза</div><div class="kpi-card__value"><?= e((string) $avgPhase) ?></div><div class="kpi-card__hint">из <?= count($phases) - 1 ?> возможных</div></div>
                         </div>
 
                         <div class="dash-toolbar">
@@ -3122,76 +2137,33 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
 
                         <div class="dash-grid">
                             <div class="dash-card dash-card--wide">
-                                <div class="dash-card__title">
-                                    Динамика активности
-                                    <span class="dash-card__hint" id="hint-activity">—</span>
-                                </div>
+                                <div class="dash-card__title">Динамика активности <span class="dash-card__hint" id="hint-activity">—</span></div>
                                 <div class="dash-card__body"><canvas id="chart-activity"></canvas></div>
                             </div>
-
                             <div class="dash-card">
-                                <div class="dash-card__title">
-                                    Распределение по фазам
-                                    <span class="dash-card__hint" id="hint-phases">—</span>
-                                </div>
+                                <div class="dash-card__title">Распределение по фазам <span class="dash-card__hint" id="hint-phases">—</span></div>
                                 <div class="dash-card__body"><canvas id="chart-phases"></canvas></div>
                             </div>
-
                             <div class="dash-card">
-                                <div class="dash-card__title">
-                                    Топ вузов
-                                    <span class="dash-card__hint" id="hint-unis">—</span>
-                                </div>
+                                <div class="dash-card__title">Топ вузов <span class="dash-card__hint" id="hint-unis">—</span></div>
                                 <div class="dash-card__body"><canvas id="chart-universities"></canvas></div>
                             </div>
-
                             <div class="dash-card dash-card--wide">
-                                <div class="dash-card__title">
-                                    Фазы по вузам
-                                    <span class="dash-card__hint" id="hint-stacked">—</span>
-                                </div>
+                                <div class="dash-card__title">Фазы по вузам <span class="dash-card__hint" id="hint-stacked">—</span></div>
                                 <div class="dash-card__body"><canvas id="chart-directions"></canvas></div>
                             </div>
-
                             <div class="dash-card dash-card--map">
-                                <div class="dash-card__title">
-                                    Карта вузов
-                                    <span class="dash-card__hint" id="hint-map">цвет — преобладающая фаза за период</span>
-                                </div>
-
+                                <div class="dash-card__title">Карта вузов <span class="dash-card__hint" id="hint-map">цвет — преобладающая фаза за период</span></div>
                                 <div class="russia-map-wrap">
-                                    <svg class="russia-map"
-                                         viewBox="0 0 <?= (int) $mapViewWidth ?> <?= (int) $mapViewHeight ?>"
-                                         preserveAspectRatio="xMidYMid meet"
-                                         xmlns="http://www.w3.org/2000/svg">
+                                    <svg class="russia-map" viewBox="0 0 <?= (int) $mapViewWidth ?> <?= (int) $mapViewHeight ?>" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
                                         <defs>
-                                            <linearGradient id="map-fill" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stop-color="#f8f4e8"/>
-                                                <stop offset="60%" stop-color="#ede7d3"/>
-                                                <stop offset="100%" stop-color="#e0d6ba"/>
-                                            </linearGradient>
-                                            <linearGradient id="map-sea" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stop-color="#eef3f6"/>
-                                                <stop offset="100%" stop-color="#dfe9ee"/>
-                                            </linearGradient>
-                                            <radialGradient id="map-vignette" cx="50%" cy="50%" r="70%">
-                                                <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
-                                                <stop offset="100%" stop-color="rgba(139,105,20,0.08)"/>
-                                            </radialGradient>
-                                            <filter id="map-glow" x="-20%" y="-20%" width="140%" height="140%">
-                                                <feGaussianBlur stdDeviation="3" result="blur"/>
-                                                <feMerge>
-                                                    <feMergeNode in="blur"/>
-                                                    <feMergeNode in="SourceGraphic"/>
-                                                </feMerge>
-                                            </filter>
-                                            <filter id="map-dot-shadow" x="-50%" y="-50%" width="200%" height="200%">
-                                                <feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-color="#000" flood-opacity="0.32"/>
-                                            </filter>
+                                            <linearGradient id="map-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f8f4e8"/><stop offset="60%" stop-color="#ede7d3"/><stop offset="100%" stop-color="#e0d6ba"/></linearGradient>
+                                            <linearGradient id="map-sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#eef3f6"/><stop offset="100%" stop-color="#dfe9ee"/></linearGradient>
+                                            <radialGradient id="map-vignette" cx="50%" cy="50%" r="70%"><stop offset="60%" stop-color="rgba(0,0,0,0)"/><stop offset="100%" stop-color="rgba(139,105,20,0.08)"/></radialGradient>
+                                            <filter id="map-glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                                            <filter id="map-dot-shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-color="#000" flood-opacity="0.32"/></filter>
                                         </defs>
-
                                         <rect width="<?= (int) $mapViewWidth ?>" height="<?= (int) $mapViewHeight ?>" fill="url(#map-sea)"/>
-
                                         <g class="map-grid-layer">
                                             <?php
                                             for ($lng = 20; $lng <= 180; $lng += 20) {
@@ -3206,55 +2178,26 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                                             }
                                             ?>
                                         </g>
-
-                                        <path class="russia-outline"
-                                              d="M 56 250 Q 60 220 90 200 Q 100 180 85 160 Q 90 145 110 155 Q 130 165 155 190 Q 175 200 200 180 Q 230 160 280 130 Q 320 115 340 160 Q 360 170 380 120 Q 420 90 470 70 Q 520 50 555 105 Q 580 115 615 105 Q 660 115 700 130 Q 760 140 820 155 Q 880 165 940 180 Q 985 195 1000 195 Q 1000 210 975 220 Q 960 235 945 260 Q 930 285 900 280 Q 875 275 855 320 Q 850 350 855 375 Q 840 380 830 340 Q 810 320 780 300 Q 765 300 760 340 Q 745 375 720 420 Q 705 445 690 440 Q 685 410 665 395 Q 645 390 600 390 Q 540 390 470 390 Q 430 400 405 400 Q 375 395 350 370 Q 330 355 305 365 Q 275 375 245 400 Q 215 425 185 445 Q 155 465 130 470 Q 105 465 90 440 Q 82 415 80 390 Q 75 355 65 320 Q 56 295 56 250 Z"/>
-
-                                        <rect width="<?= (int) $mapViewWidth ?>" height="<?= (int) $mapViewHeight ?>"
-                                              fill="url(#map-vignette)" pointer-events="none"/>
-
-                                        <text x="<?= (int) ($mapViewWidth / 2) ?>" y="<?= (int) ($mapViewHeight - 18) ?>"
-                                              text-anchor="middle"
-                                              style="font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 500; fill: rgba(139,105,20,0.28); letter-spacing: 0.2em;"
-                                              pointer-events="none">РОССИЙСКАЯ ФЕДЕРАЦИЯ</text>
-
+                                        <path class="russia-outline" d="M 56 250 Q 60 220 90 200 Q 100 180 85 160 Q 90 145 110 155 Q 130 165 155 190 Q 175 200 200 180 Q 230 160 280 130 Q 320 115 340 160 Q 360 170 380 120 Q 420 90 470 70 Q 520 50 555 105 Q 580 115 615 105 Q 660 115 700 130 Q 760 140 820 155 Q 880 165 940 180 Q 985 195 1000 195 Q 1000 210 975 220 Q 960 235 945 260 Q 930 285 900 280 Q 875 275 855 320 Q 850 350 855 375 Q 840 380 830 340 Q 810 320 780 300 Q 765 300 760 340 Q 745 375 720 420 Q 705 445 690 440 Q 685 410 665 395 Q 645 390 600 390 Q 540 390 470 390 Q 430 400 405 400 Q 375 395 350 370 Q 330 355 305 365 Q 275 375 245 400 Q 215 425 185 445 Q 155 465 130 470 Q 105 465 90 440 Q 82 415 80 390 Q 75 355 65 320 Q 56 295 56 250 Z"/>
+                                        <rect width="<?= (int) $mapViewWidth ?>" height="<?= (int) $mapViewHeight ?>" fill="url(#map-vignette)" pointer-events="none"/>
+                                        <text x="<?= (int) ($mapViewWidth / 2) ?>" y="<?= (int) ($mapViewHeight - 18) ?>" text-anchor="middle" style="font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 500; fill: rgba(139,105,20,0.28); letter-spacing: 0.2em;" pointer-events="none">РОССИЙСКАЯ ФЕДЕРАЦИЯ</text>
                                         <g class="map-points-layer">
                                             <?php foreach ($mapPoints as $p): ?>
-                                                <g class="uni-point"
-                                                   data-uni-id="<?= (int) $p['id'] ?>"
-                                                   data-name="<?= e($p['short']) ?>"
-                                                   data-full="<?= e($p['name']) ?>">
-                                                    <circle class="uni-point__pulse" r="16"
-                                                            stroke="<?= e($p['color']) ?>"
-                                                            cx="<?= (float) $p['x'] ?>"
-                                                            cy="<?= (float) $p['y'] ?>"/>
-                                                    <circle class="uni-point__halo" r="20"
-                                                            fill="<?= e($p['color']) ?>"
-                                                            cx="<?= (float) $p['x'] ?>"
-                                                            cy="<?= (float) $p['y'] ?>"
-                                                            opacity="0"/>
-                                                    <circle class="uni-point__dot" r="11"
-                                                            fill="<?= e($p['color']) ?>"
-                                                            stroke="#ffffff" stroke-width="2"
-                                                            cx="<?= (float) $p['x'] ?>"
-                                                            cy="<?= (float) $p['y'] ?>"
-                                                            filter="url(#map-dot-shadow)"/>
-                                                    <text class="uni-point__label"
-                                                          x="<?= (float) $p['x'] ?>"
-                                                          y="<?= (float) ($p['y'] + 28) ?>"
-                                                          text-anchor="middle"><?= e($p['short']) ?></text>
+                                                <g class="uni-point" data-uni-id="<?= (int) $p['id'] ?>" data-name="<?= e($p['short']) ?>" data-full="<?= e($p['name']) ?>">
+                                                    <circle class="uni-point__pulse" r="16" stroke="<?= e($p['color']) ?>" cx="<?= (float) $p['x'] ?>" cy="<?= (float) $p['y'] ?>"/>
+                                                    <circle class="uni-point__halo" r="20" fill="<?= e($p['color']) ?>" cx="<?= (float) $p['x'] ?>" cy="<?= (float) $p['y'] ?>" opacity="0"/>
+                                                    <circle class="uni-point__dot" r="11" fill="<?= e($p['color']) ?>" stroke="#ffffff" stroke-width="2" cx="<?= (float) $p['x'] ?>" cy="<?= (float) $p['y'] ?>" filter="url(#map-dot-shadow)"/>
+                                                    <text class="uni-point__label" x="<?= (float) $p['x'] ?>" y="<?= (float) ($p['y'] + 28) ?>" text-anchor="middle"><?= e($p['short']) ?></text>
                                                 </g>
                                             <?php endforeach; ?>
                                         </g>
                                     </svg>
-
                                     <div class="map-info" id="map-info" aria-hidden="true">
                                         <div class="map-info__phase" id="map-info-phase">—</div>
                                         <div class="map-info__name" id="map-info-name">—</div>
                                         <div class="map-info__projects" id="map-info-projects">—</div>
                                     </div>
                                 </div>
-
                                 <div class="map-legend" id="map-legend">
                                     <?php foreach ($chartPhases as $phase): ?>
                                         <span class="map-legend__item" data-phase-id="<?= (int) $phase['id'] ?>">
@@ -3275,14 +2218,11 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
     <script>
     (function () {
         'use strict';
-
         var PHASES = <?= json_encode($phaseMeta, JSON_UNESCAPED_UNICODE) ?>;
         var phaseByNum = {};
         PHASES.forEach(function (p) { phaseByNum[p.num] = p; });
 
-        var cells = Array.prototype.slice.call(
-            document.querySelectorAll('table.matrix td.phase[draggable="true"]')
-        );
+        var cells = Array.prototype.slice.call(document.querySelectorAll('table.matrix td.phase[draggable="true"]'));
         if (cells.length === 0) return;
 
         var source = null;
@@ -3299,26 +2239,19 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             pocket.className = 'phase-pocket phase-pocket--' + direction;
             pocket.dataset.phaseId = phase.id;
             pocket.dataset.phaseNum = phase.num;
-
             var arrow = direction === 'prev' ? '↑' : '↓';
             var label = direction === 'prev' ? 'Предыдущая фаза' : 'Следующая фаза';
-
             pocket.innerHTML = ''
                 + '<div class="phase-pocket__pin"></div>'
-                + '<div class="phase-pocket__label">'
-                +   '<span class="phase-pocket__label-arrow">' + arrow + '</span>'
-                +   label
-                + '</div>'
+                + '<div class="phase-pocket__label"><span class="phase-pocket__label-arrow">' + arrow + '</span>' + label + '</div>'
                 + '<div class="phase-pocket__body">'
                 +   '<span class="phase-pocket__num" style="background-color: ' + phase.color + '">' + phase.num + '</span>'
                 +   '<span class="phase-pocket__name">' + escapeHtml(phase.name) + '</span>'
                 +   (phase.requires_confirmation ? '<span class="phase-pocket__lock" title="Требует подтверждения вуза">🔒</span>' : '')
                 + '</div>';
-
             var pw = 240;
             var left = rect.left + rect.width / 2 - pw / 2;
             left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
-
             var gap = 14;
             var top;
             if (direction === 'prev') {
@@ -3329,23 +2262,12 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                 if (top + 90 > window.innerHeight - 8) { top = rect.top - 90 - gap; left = Math.max(8, left + 60); }
             }
             top = Math.max(8, Math.min(top, window.innerHeight - 96));
-
             pocket.style.left = left + 'px';
             pocket.style.top = top + 'px';
             pocket.style.width = pw + 'px';
-
-            pocket.addEventListener('dragover', function (e) {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                pocket.classList.add('is-hover');
-            });
+            pocket.addEventListener('dragover', function (e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; pocket.classList.add('is-hover'); });
             pocket.addEventListener('dragleave', function () { pocket.classList.remove('is-hover'); });
-            pocket.addEventListener('drop', function (e) {
-                e.preventDefault();
-                if (!source) return;
-                doMove(source.dataset.project, pocket.dataset.phaseId);
-            });
-
+            pocket.addEventListener('drop', function (e) { e.preventDefault(); if (!source) return; doMove(source.dataset.project, pocket.dataset.phaseId); });
             document.body.appendChild(pocket);
             requestAnimationFrame(function () { pocket.classList.add('is-visible'); });
             pockets.push(pocket);
@@ -3362,14 +2284,10 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         function doMove(projectId, targetPhaseId) {
             var pid = parseInt(projectId, 10);
             cleanup();
-
             fetch('index.php?action=move_phase', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    project_id: pid,
-                    target_phase_id: parseInt(targetPhaseId, 10)
-                })
+                body: JSON.stringify({ project_id: pid, target_phase_id: parseInt(targetPhaseId, 10) })
             })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -3384,34 +2302,22 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                 source = td;
                 var fromNum = parseInt(td.dataset.phaseNum, 10);
                 var rect = td.getBoundingClientRect();
-
                 document.body.classList.add('is-dragging');
                 td.classList.add('is-drag-source');
-
                 var prev = phaseByNum[fromNum - 1];
                 var next = phaseByNum[fromNum + 1];
                 if (prev) makePocket(prev, 'prev', rect);
                 if (next) makePocket(next, 'next', rect);
-
-                e.dataTransfer.setData('text/plain', JSON.stringify({
-                    projectId: td.dataset.project,
-                    fromPhaseId: td.dataset.phaseId
-                }));
+                e.dataTransfer.setData('text/plain', JSON.stringify({ projectId: td.dataset.project, fromPhaseId: td.dataset.phaseId }));
                 e.dataTransfer.effectAllowed = 'move';
             });
-
             td.addEventListener('dragend', function () { cleanup(); });
-
             td.addEventListener('click', function () {
                 if (source !== null) return;
                 window.location.href = 'index.php?role=manager&project=' + td.dataset.project;
             });
-
             td.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    window.location.href = 'index.php?role=manager&project=' + td.dataset.project;
-                }
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = 'index.php?role=manager&project=' + td.dataset.project; }
             });
         });
     })();
@@ -3426,7 +2332,6 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         // ===== Табы =====
         var tabs = document.querySelectorAll('.tab[data-tab]');
         var contents = document.querySelectorAll('.tab-content[data-tab-content]');
-
         tabs.forEach(function (tab) {
             tab.addEventListener('click', function () {
                 var target = tab.dataset.tab;
@@ -3440,16 +2345,15 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             });
         });
 
-        // ===== Журнал: выбор даты =====
+        // ===== Журнал =====
         var journalTable = document.getElementById('journal-table');
         if (!journalTable) return;
 
-        var lessonsJson = document.getElementById('journal-lessons-json');
-        var datesJson = document.getElementById('journal-dates-json');
-        if (!lessonsJson || !datesJson) return;
-
-        var lessons = JSON.parse(lessonsJson.textContent);
-        var dates = JSON.parse(datesJson.textContent);
+        var lessons = JSON.parse(document.getElementById('journal-lessons-json').textContent);
+        var dates = JSON.parse(document.getElementById('journal-dates-json').textContent);
+        var notes = JSON.parse(document.getElementById('journal-notes-json').textContent);
+        var students = JSON.parse(document.getElementById('journal-students-json').textContent);
+        var marks = JSON.parse(document.getElementById('journal-marks-json').textContent);
 
         var headerCells = journalTable.querySelectorAll('thead th[data-date-index]');
         var cellCells = journalTable.querySelectorAll('tbody td.journal-cell[data-date-index]');
@@ -3467,7 +2371,6 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                 var i = parseInt(td.dataset.dateIndex, 10);
                 td.classList.toggle('is-highlighted', i === idx);
             });
-
             var lesson = lessons[idx];
             if (lesson) {
                 panel.classList.remove('journal-lesson--empty');
@@ -3483,15 +2386,177 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         }
 
         headerCells.forEach(function (th) {
-            th.addEventListener('click', function () {
-                selectDate(parseInt(th.dataset.dateIndex, 10));
+            th.addEventListener('click', function () { selectDate(parseInt(th.dataset.dateIndex, 10)); });
+        });
+
+        // ===== Popover с заметкой =====
+        var popover = document.createElement('div');
+        popover.className = 'note-popover';
+        popover.innerHTML = ''
+            + '<div class="note-popover__header">'
+            +   '<div>'
+            +     '<div class="note-popover__student" id="np-student">—</div>'
+            +     '<div class="note-popover__meta" id="np-meta">—</div>'
+            +   '</div>'
+            +   '<div class="note-popover__mark" id="np-mark">—</div>'
+            + '</div>'
+            + '<label class="note-popover__label" for="np-textarea">Заметка преподавателя</label>'
+            + '<textarea class="note-popover__textarea" id="np-textarea" placeholder="Например: разобрать подробнее тему, дать индивидуальное задание..."></textarea>'
+            + '<div class="note-popover__actions">'
+            +   '<button type="button" class="note-popover__btn note-popover__btn--danger" id="np-delete">Удалить</button>'
+            +   '<button type="button" class="note-popover__btn" id="np-cancel">Отмена</button>'
+            +   '<button type="button" class="note-popover__btn note-popover__btn--primary" id="np-save">Сохранить</button>'
+            + '</div>'
+            + '<div class="note-popover__hint">Заметку можно привязать к оценке, к точке «·» или к «н».</div>';
+        document.body.appendChild(popover);
+
+        var npStudent = document.getElementById('np-student');
+        var npMeta = document.getElementById('np-meta');
+        var npMark = document.getElementById('np-mark');
+        var npTextarea = document.getElementById('np-textarea');
+        var npSave = document.getElementById('np-save');
+        var npCancel = document.getElementById('np-cancel');
+        var npDelete = document.getElementById('np-delete');
+
+        var activeCell = null;
+
+        function markClass(m) {
+            if (m === '5') return 'note-popover__mark--grade-5';
+            if (m === '4') return 'note-popover__mark--grade-4';
+            if (m === '3') return 'note-popover__mark--grade-3';
+            if (m === '2') return 'note-popover__mark--grade-2';
+            if (m === '·') return 'note-popover__mark--dot';
+            if (m === 'н') return 'note-popover__mark--absent';
+            return '';
+        }
+
+        function markLabel(m) {
+            if (m === '·') return '·';
+            if (m === 'н') return 'н';
+            return m;
+        }
+
+        function openPopoverFor(cell) {
+            activeCell = cell;
+            var sid = parseInt(cell.dataset.studentId, 10);
+            var di = parseInt(cell.dataset.dateIndex, 10);
+            var student = students.find(function (s) { return s.id === sid; });
+            var m = (marks[sid] && marks[sid][di]) || '';
+            var text = (notes[sid] && notes[sid][di]) || '';
+
+            npStudent.textContent = student ? student.name : '—';
+            npMeta.textContent = 'Дата: ' + (dates[di] || '—') + ' · ' + (lessons[di] ? lessons[di].topic : '');
+            npMark.textContent = markLabel(m);
+            npMark.className = 'note-popover__mark ' + markClass(m);
+            npTextarea.value = text;
+
+            var rect = cell.getBoundingClientRect();
+            var pw = 340;
+            var left = rect.left + rect.width / 2 - pw / 2;
+            left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+            var top = rect.bottom + 10;
+            if (top + 260 > window.innerHeight - 8) top = rect.top - 270;
+            top = Math.max(8, Math.min(top, window.innerHeight - 270));
+            popover.style.left = left + 'px';
+            popover.style.top = top + 'px';
+            requestAnimationFrame(function () { popover.classList.add('is-visible'); });
+            npTextarea.focus();
+        }
+
+        function closePopover() {
+            popover.classList.remove('is-visible');
+            activeCell = null;
+        }
+
+        cellCells.forEach(function (td) {
+            td.addEventListener('click', function (e) {
+                e.stopPropagation();
+                openPopoverFor(td);
             });
         });
 
-        // Автовыбор первого урока при открытии вкладки
-        if (dates.length > 0) {
-            selectDate(0);
+        document.addEventListener('click', function (e) {
+            if (!popover.contains(e.target)) closePopover();
+        });
+        popover.addEventListener('click', function (e) { e.stopPropagation(); });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePopover(); });
+
+        npCancel.addEventListener('click', closePopover);
+
+        npSave.addEventListener('click', function () {
+            if (!activeCell) return;
+            var sid = parseInt(activeCell.dataset.studentId, 10);
+            var di = parseInt(activeCell.dataset.dateIndex, 10);
+            var text = npTextarea.value.trim();
+            if (!notes[sid]) notes[sid] = {};
+            if (text === '') delete notes[sid][di];
+            else notes[sid][di] = text;
+            activeCell.classList.toggle('has-note', text !== '');
+            closePopover();
+        });
+
+        npDelete.addEventListener('click', function () {
+            if (!activeCell) return;
+            var sid = parseInt(activeCell.dataset.studentId, 10);
+            var di = parseInt(activeCell.dataset.dateIndex, 10);
+            if (notes[sid]) delete notes[sid][di];
+            activeCell.classList.remove('has-note');
+            closePopover();
+        });
+
+        if (dates.length > 0) selectDate(0);
+    })();
+    </script>
+    <?php endif; ?>
+
+    <?php if ($viewRole === 'parent' && $currentUser !== null): ?>
+    <script>
+    (function () {
+        'use strict';
+        var tabs = document.querySelectorAll('.tab[data-tab]');
+        var contents = document.querySelectorAll('.tab-content[data-tab-content]');
+        tabs.forEach(function (tab) {
+            tab.addEventListener('click', function () {
+                var target = tab.dataset.tab;
+                tabs.forEach(function (t) { t.classList.toggle('is-active', t === tab); });
+                contents.forEach(function (c) { c.classList.toggle('is-active', c.dataset.tabContent === target); });
+            });
+        });
+
+        var lessonsJson = document.getElementById('parent-lessons-json');
+        var datesJson = document.getElementById('parent-dates-json');
+        if (!lessonsJson || !datesJson) return;
+        var lessons = JSON.parse(lessonsJson.textContent);
+        var dates = JSON.parse(datesJson.textContent);
+
+        var table = document.getElementById('journal-table-parent');
+        if (!table) return;
+        var rows = table.querySelectorAll('tbody tr[data-date-index]');
+        var panelDate = document.getElementById('parent-journal-date');
+        var panelTopic = document.getElementById('parent-journal-topic');
+        var panelHw = document.getElementById('parent-journal-homework');
+        var panel = document.getElementById('parent-journal-lesson');
+
+        function selectRow(idx) {
+            rows.forEach(function (r) {
+                var i = parseInt(r.dataset.dateIndex, 10);
+                r.style.background = (i === idx) ? 'rgba(139,105,20,0.08)' : '';
+            });
+            var lesson = lessons[idx];
+            if (lesson) {
+                panel.classList.remove('journal-lesson--empty');
+                panelDate.textContent = 'Дата: ' + (dates[idx] || '—');
+                panelTopic.textContent = lesson.topic;
+                panelHw.innerHTML = '<strong>Домашнее задание:</strong> ' + lesson.homework;
+            }
         }
+
+        rows.forEach(function (r) {
+            r.style.cursor = 'pointer';
+            r.addEventListener('click', function () { selectRow(parseInt(r.dataset.dateIndex, 10)); });
+        });
+
+        if (rows.length > 0) selectRow(0);
     })();
     </script>
     <?php endif; ?>
@@ -3501,9 +2566,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
     <script>
     (function () {
         'use strict';
-
         var DASH = <?= json_encode($dashPayload, JSON_UNESCAPED_UNICODE) ?>;
-
         var accent = '#8b6914';
         var accentDark = '#6b5010';
         var gridColor = 'rgba(26, 26, 26, 0.08)';
@@ -3516,18 +2579,10 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         var state = { months: 12, chartType: 'line', phaseId: null, uniId: null, aggregate: null };
         var charts = { activity: null, phases: null, unis: null, stacked: null };
 
-        function phaseById(id) {
-            for (var i = 0; i < DASH.phases.length; i++) if (DASH.phases[i].id === id) return DASH.phases[i];
-            return null;
-        }
-        function uniById(id) {
-            for (var i = 0; i < DASH.universities.length; i++) if (DASH.universities[i].id === id) return DASH.universities[i];
-            return null;
-        }
-        function anyUniById(id) {
-            for (var i = 0; i < DASH.allUniversities.length; i++) if (DASH.allUniversities[i].id === id) return DASH.allUniversities[i];
-            return null;
-        }
+        function phaseById(id) { for (var i = 0; i < DASH.phases.length; i++) if (DASH.phases[i].id === id) return DASH.phases[i]; return null; }
+        function uniById(id) { for (var i = 0; i < DASH.universities.length; i++) if (DASH.universities[i].id === id) return DASH.universities[i]; return null; }
+        function anyUniById(id) { for (var i = 0; i < DASH.allUniversities.length; i++) if (DASH.allUniversities[i].id === id) return DASH.allUniversities[i]; return null; }
+
         function hexWithAlpha(hex, alpha) {
             if (!hex || hex.charAt(0) !== '#') return hex;
             var h = hex.substring(1);
@@ -3562,10 +2617,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             Object.keys(state.aggregate.byUniPhase).forEach(function (uid) {
                 if (state.uniId && parseInt(uid, 10) !== state.uniId) return;
                 var u = state.aggregate.byUniPhase[uid];
-                Object.keys(u).forEach(function (pid) {
-                    var key = parseInt(pid, 10);
-                    if (res[key] !== undefined) res[key] += u[pid];
-                });
+                Object.keys(u).forEach(function (pid) { var key = parseInt(pid, 10); if (res[key] !== undefined) res[key] += u[pid]; });
             });
             return res;
         }
@@ -3589,9 +2641,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             var u = state.aggregate.byUniPhase[String(uid)];
             if (!u) return null;
             var maxCount = 0, maxPid = null;
-            Object.keys(u).forEach(function (pidStr) {
-                if (u[pidStr] > maxCount) { maxCount = u[pidStr]; maxPid = parseInt(pidStr, 10); }
-            });
+            Object.keys(u).forEach(function (pidStr) { if (u[pidStr] > maxCount) { maxCount = u[pidStr]; maxPid = parseInt(pidStr, 10); } });
             return maxPid;
         }
 
@@ -3602,7 +2652,6 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             var canvas = document.getElementById('chart-activity');
             if (!canvas) return;
             if (charts.activity) { charts.activity.destroy(); charts.activity = null; }
-
             var labels = state.aggregate.labels;
             var actData = state.aggregate.activity;
             var newData = state.aggregate.newProjects;
@@ -3611,42 +2660,15 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             gradient.addColorStop(1, 'rgba(139, 105, 20, 0.02)');
             var type = state.chartType === 'bar' ? 'bar' : 'line';
             var fill = state.chartType === 'area';
-
             var datasets = [
-                {
-                    label: 'Активность', data: actData,
-                    borderColor: accent,
-                    backgroundColor: type === 'bar' ? accent : (fill ? gradient : 'rgba(139, 105, 20, 0.08)'),
-                    fill: fill || type === 'bar', tension: 0.35,
-                    pointBackgroundColor: accent, pointBorderColor: '#fff', pointBorderWidth: 2,
-                    pointRadius: type === 'bar' ? 0 : 4, pointHoverRadius: type === 'bar' ? 0 : 7,
-                    borderWidth: 2, borderRadius: type === 'bar' ? 3 : 0, barPercentage: 0.6
-                },
-                {
-                    label: 'Новые проекты', data: newData,
-                    borderColor: accentDark, backgroundColor: 'transparent',
-                    borderDash: type === 'bar' ? [] : [4,4], tension: 0.35,
-                    pointBackgroundColor: accentDark,
-                    pointRadius: type === 'bar' ? 0 : 3, pointHoverRadius: 5,
-                    borderWidth: 1.5, type: 'line', hidden: type === 'bar'
-                }
+                { label: 'Активность', data: actData, borderColor: accent, backgroundColor: type === 'bar' ? accent : (fill ? gradient : 'rgba(139, 105, 20, 0.08)'), fill: fill || type === 'bar', tension: 0.35, pointBackgroundColor: accent, pointBorderColor: '#fff', pointBorderWidth: 2, pointRadius: type === 'bar' ? 0 : 4, pointHoverRadius: type === 'bar' ? 0 : 7, borderWidth: 2, borderRadius: type === 'bar' ? 3 : 0, barPercentage: 0.6 },
+                { label: 'Новые проекты', data: newData, borderColor: accentDark, backgroundColor: 'transparent', borderDash: type === 'bar' ? [] : [4,4], tension: 0.35, pointBackgroundColor: accentDark, pointRadius: type === 'bar' ? 0 : 3, pointHoverRadius: 5, borderWidth: 1.5, type: 'line', hidden: type === 'bar' }
             ];
-
             charts.activity = new Chart(canvas, {
-                type: type,
-                data: { labels: labels, datasets: datasets },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    animation: { duration: 500, easing: 'easeOutQuart' },
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 14, font: { size: 11 } } },
-                        tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2 }
-                    },
-                    scales: {
-                        x: { grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor } },
-                        y: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } }
-                    }
+                type: type, data: { labels: labels, datasets: datasets },
+                options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500, easing: 'easeOutQuart' }, interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 14, font: { size: 11 } } }, tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2 } },
+                    scales: { x: { grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor } }, y: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } } }
                 }
             });
         }
@@ -3655,42 +2677,17 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             var canvas = document.getElementById('chart-phases');
             if (!canvas) return;
             if (charts.phases) { charts.phases.destroy(); charts.phases = null; }
-
             var byPhase = computeByPhase();
             var labels = DASH.phases.map(function (p) { return p.num + '. ' + p.name; });
             var colors = DASH.phases.map(function (p) { return p.color; });
             var data = DASH.phases.map(function (p) { return byPhase[p.id] || 0; });
-            var alphas = DASH.phases.map(function (p) {
-                if (state.phaseId && p.id !== state.phaseId) return 0.22;
-                return 1;
-            });
-
+            var alphas = DASH.phases.map(function (p) { if (state.phaseId && p.id !== state.phaseId) return 0.22; return 1; });
             charts.phases = new Chart(canvas, {
                 type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: data,
-                        backgroundColor: colors.map(function (c, i) { return hexWithAlpha(c, alphas[i]); }),
-                        borderColor: '#fff', borderWidth: 2, hoverOffset: 8
-                    }]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false, cutout: '60%',
-                    animation: { duration: 500, easing: 'easeOutQuart' },
-                    onClick: function (evt, els) {
-                        if (!els || !els.length) return;
-                        var pid = DASH.phases[els[0].index].id;
-                        state.phaseId = (state.phaseId === pid) ? null : pid;
-                        refreshAll();
-                    },
-                    plugins: {
-                        legend: { position: 'right', labels: { boxWidth: 10, boxHeight: 10, padding: 8, font: { size: 10 } } },
-                        tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2,
-                            callbacks: { label: function (ctx) { return ctx.label + ': ' + ctx.parsed + ' проектов'; } }
-                        }
-                    }
+                data: { labels: labels, datasets: [{ data: data, backgroundColor: colors.map(function (c, i) { return hexWithAlpha(c, alphas[i]); }), borderColor: '#fff', borderWidth: 2, hoverOffset: 8 }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '60%', animation: { duration: 500, easing: 'easeOutQuart' },
+                    onClick: function (evt, els) { if (!els || !els.length) return; var pid = DASH.phases[els[0].index].id; state.phaseId = (state.phaseId === pid) ? null : pid; refreshAll(); },
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 10, boxHeight: 10, padding: 8, font: { size: 10 } } }, tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2, callbacks: { label: function (ctx) { return ctx.label + ': ' + ctx.parsed + ' проектов'; } } } }
                 }
             });
         }
@@ -3699,93 +2696,29 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             var canvas = document.getElementById('chart-universities');
             if (!canvas) return;
             if (charts.unis) { charts.unis.destroy(); charts.unis = null; }
-
             var byUni = computeByUni();
             var labels = DASH.universities.map(function (u) { return u.short; });
             var data = DASH.universities.map(function (u) { return byUni[u.id] || 0; });
-            var bgs = DASH.universities.map(function (u) {
-                if (state.uniId && u.id !== state.uniId) return hexWithAlpha(accent, 0.22);
-                return accent;
-            });
-            var hoverBgs = DASH.universities.map(function (u) {
-                if (state.uniId && u.id !== state.uniId) return hexWithAlpha(accentDark, 0.3);
-                return accentDark;
-            });
-
+            var bgs = DASH.universities.map(function (u) { if (state.uniId && u.id !== state.uniId) return hexWithAlpha(accent, 0.22); return accent; });
+            var hoverBgs = DASH.universities.map(function (u) { if (state.uniId && u.id !== state.uniId) return hexWithAlpha(accentDark, 0.3); return accentDark; });
             var type = state.chartType === 'bar' ? 'bar' : 'line';
             var fill = state.chartType === 'area';
             var dataset, options;
-
             if (type === 'bar') {
-                dataset = {
-                    label: 'Проектов', data: data,
-                    backgroundColor: bgs, hoverBackgroundColor: hoverBgs,
-                    borderRadius: 3, barThickness: 16
-                };
-                options = {
-                    indexAxis: 'y',
-                    responsive: true, maintainAspectRatio: false,
-                    animation: { duration: 500, easing: 'easeOutQuart' },
-                    onClick: function (evt, els) {
-                        if (!els || !els.length) return;
-                        var uid = DASH.universities[els[0].index].id;
-                        state.uniId = (state.uniId === uid) ? null : uid;
-                        refreshAll();
-                    },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2,
-                            callbacks: {
-                                label: function (ctx) {
-                                    var v = ctx.parsed && ctx.parsed.x !== undefined ? ctx.parsed.x : ctx.parsed;
-                                    return 'Проектов: ' + v;
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } },
-                        y: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } }
-                    }
+                dataset = { label: 'Проектов', data: data, backgroundColor: bgs, hoverBackgroundColor: hoverBgs, borderRadius: 3, barThickness: 16 };
+                options = { indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: { duration: 500, easing: 'easeOutQuart' },
+                    onClick: function (evt, els) { if (!els || !els.length) return; var uid = DASH.universities[els[0].index].id; state.uniId = (state.uniId === uid) ? null : uid; refreshAll(); },
+                    plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2, callbacks: { label: function (ctx) { var v = ctx.parsed && ctx.parsed.x !== undefined ? ctx.parsed.x : ctx.parsed; return 'Проектов: ' + v; } } } },
+                    scales: { x: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } }, y: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } } }
                 };
             } else {
-                dataset = {
-                    label: 'Проектов', data: data,
-                    borderColor: accent,
-                    backgroundColor: fill ? hexWithAlpha(accent, 0.35) : hexWithAlpha(accent, 0.1),
-                    fill: fill, tension: 0.35,
-                    pointBackgroundColor: accent, pointBorderColor: '#fff', pointBorderWidth: 2,
-                    pointRadius: 5, pointHoverRadius: 8, borderWidth: 2
-                };
-                options = {
-                    responsive: true, maintainAspectRatio: false,
-                    animation: { duration: 500, easing: 'easeOutQuart' },
-                    onClick: function (evt, els) {
-                        if (!els || !els.length) return;
-                        var uid = DASH.universities[els[0].index].id;
-                        state.uniId = (state.uniId === uid) ? null : uid;
-                        refreshAll();
-                    },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2,
-                            callbacks: {
-                                label: function (ctx) {
-                                    var v = ctx.parsed && ctx.parsed.y !== undefined ? ctx.parsed.y : ctx.parsed;
-                                    return 'Проектов: ' + v;
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 }, autoSkip: false, maxRotation: 45, minRotation: 0 } },
-                        y: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } }
-                    }
+                dataset = { label: 'Проектов', data: data, borderColor: accent, backgroundColor: fill ? hexWithAlpha(accent, 0.35) : hexWithAlpha(accent, 0.1), fill: fill, tension: 0.35, pointBackgroundColor: accent, pointBorderColor: '#fff', pointBorderWidth: 2, pointRadius: 5, pointHoverRadius: 8, borderWidth: 2 };
+                options = { responsive: true, maintainAspectRatio: false, animation: { duration: 500, easing: 'easeOutQuart' },
+                    onClick: function (evt, els) { if (!els || !els.length) return; var uid = DASH.universities[els[0].index].id; state.uniId = (state.uniId === uid) ? null : uid; refreshAll(); },
+                    plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2, callbacks: { label: function (ctx) { var v = ctx.parsed && ctx.parsed.y !== undefined ? ctx.parsed.y : ctx.parsed; return 'Проектов: ' + v; } } } },
+                    scales: { x: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 }, autoSkip: false, maxRotation: 45, minRotation: 0 } }, y: { beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } } }
                 };
             }
-
             charts.unis = new Chart(canvas, { type: type, data: { labels: labels, datasets: [dataset] }, options: options });
         }
 
@@ -3793,7 +2726,6 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             var canvas = document.getElementById('chart-directions');
             if (!canvas) return;
             if (charts.stacked) { charts.stacked.destroy(); charts.stacked = null; }
-
             var byUniPhase = state.aggregate.byUniPhase;
             var uniLabels = DASH.universities.map(function (u) { return u.short; });
             var phaseIds = DASH.phases.map(function (p) { return p.id; });
@@ -3801,7 +2733,6 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             var phaseColors = DASH.phases.map(function (p) { return p.color; });
             var type = state.chartType === 'bar' ? 'bar' : 'line';
             var fill = state.chartType === 'area';
-
             var datasets = [];
             for (var i = 0; i < phaseIds.length; i++) {
                 var pid = phaseIds[i];
@@ -3812,37 +2743,16 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                     return uData ? (uData[String(pid)] || 0) : 0;
                 });
                 var alpha = isDimmed ? 0.22 : 1;
-                var ds = {
-                    label: phaseLabels[i], data: data,
-                    borderColor: phaseColors[i], borderWidth: 2, tension: 0.35,
-                    pointBackgroundColor: phaseColors[i], pointBorderColor: '#fff', pointBorderWidth: 1.5,
-                    pointRadius: type === 'bar' ? 0 : 4, pointHoverRadius: 6
-                };
-                if (type === 'bar') {
-                    ds.backgroundColor = hexWithAlpha(phaseColors[i], alpha * 0.9);
-                    ds.borderRadius = 2;
-                    ds.stack = 'phases';
-                } else {
-                    ds.backgroundColor = fill ? hexWithAlpha(phaseColors[i], alpha * 0.35) : 'transparent';
-                    ds.fill = fill;
-                }
+                var ds = { label: phaseLabels[i], data: data, borderColor: phaseColors[i], borderWidth: 2, tension: 0.35, pointBackgroundColor: phaseColors[i], pointBorderColor: '#fff', pointBorderWidth: 1.5, pointRadius: type === 'bar' ? 0 : 4, pointHoverRadius: 6 };
+                if (type === 'bar') { ds.backgroundColor = hexWithAlpha(phaseColors[i], alpha * 0.9); ds.borderRadius = 2; ds.stack = 'phases'; }
+                else { ds.backgroundColor = fill ? hexWithAlpha(phaseColors[i], alpha * 0.35) : 'transparent'; ds.fill = fill; }
                 datasets.push(ds);
             }
-
             charts.stacked = new Chart(canvas, {
-                type: type,
-                data: { labels: uniLabels, datasets: datasets },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    animation: { duration: 500, easing: 'easeOutQuart' },
-                    plugins: {
-                        legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, padding: 10, font: { size: 10 } } },
-                        tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2 }
-                    },
-                    scales: {
-                        x: { stacked: type === 'bar', grid: { display: false }, ticks: { color: textColor } },
-                        y: { stacked: type === 'bar', beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } }
-                    }
+                type: type, data: { labels: uniLabels, datasets: datasets },
+                options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500, easing: 'easeOutQuart' },
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, padding: 10, font: { size: 10 } } }, tooltip: { backgroundColor: 'rgba(26, 26, 26, 0.92)', padding: 10, cornerRadius: 2 } },
+                    scales: { x: { stacked: type === 'bar', grid: { display: false }, ticks: { color: textColor } }, y: { stacked: type === 'bar', beginAtZero: true, grid: { color: gridColor, drawBorder: false }, ticks: { color: textColor, precision: 0 } } }
                 }
             });
         }
@@ -3850,8 +2760,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
         function renderMap() {
             var mapWrap = document.querySelector('.russia-map-wrap');
             if (!mapWrap) return;
-            var points = mapWrap.querySelectorAll('.uni-point');
-            points.forEach(function (g) {
+            mapWrap.querySelectorAll('.uni-point').forEach(function (g) {
                 var uid = parseInt(g.dataset.uniId, 10);
                 g.classList.remove('is-dimmed', 'is-selected');
                 var topPid = topPhaseForUni(uid);
@@ -3868,15 +2777,11 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                     var uData = state.aggregate.byUniPhase[String(uid)];
                     var inPhase = uData && uData[String(state.phaseId)];
                     if (!inPhase) g.classList.add('is-dimmed');
-                } else if (state.uniId && uid !== state.uniId) {
-                    g.classList.add('is-dimmed');
-                } else if (!hasData) {
-                    g.classList.add('is-dimmed');
-                }
+                } else if (state.uniId && uid !== state.uniId) { g.classList.add('is-dimmed'); }
+                else if (!hasData) { g.classList.add('is-dimmed'); }
             });
             document.querySelectorAll('.map-legend__item').forEach(function (li) {
-                var pid = parseInt(li.dataset.phaseId, 10);
-                li.classList.toggle('is-active', state.phaseId === pid);
+                li.classList.toggle('is-active', state.phaseId === parseInt(li.dataset.phaseId, 10));
             });
         }
 
@@ -3901,54 +2806,27 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
             if ((el = document.getElementById('hint-map'))) el.textContent = 'за ' + state.months + ' мес · цвет — преобладающая фаза';
         }
 
-        function refreshAll() {
-            rebuildAggregate();
-            renderPhases(); renderUnis(); renderStacked(); renderMap();
-            updateChip(); updateHints();
-        }
+        function refreshAll() { rebuildAggregate(); renderPhases(); renderUnis(); renderStacked(); renderMap(); updateChip(); updateHints(); }
 
         rebuildAggregate();
         renderActivity(); renderPhases(); renderUnis(); renderStacked(); renderMap();
         updateChip(); updateHints();
 
         var monthBtns = document.querySelectorAll('[data-months]');
-        monthBtns.forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                monthBtns.forEach(function (b) { b.classList.remove('is-active'); });
-                btn.classList.add('is-active');
-                state.months = parseInt(btn.dataset.months, 10);
-                refreshAll(); renderActivity();
-            });
-        });
-
+        monthBtns.forEach(function (btn) { btn.addEventListener('click', function () { monthBtns.forEach(function (b) { b.classList.remove('is-active'); }); btn.classList.add('is-active'); state.months = parseInt(btn.dataset.months, 10); refreshAll(); renderActivity(); }); });
         var typeBtns = document.querySelectorAll('[data-act-type]');
-        typeBtns.forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                typeBtns.forEach(function (b) { b.classList.remove('is-active'); });
-                btn.classList.add('is-active');
-                state.chartType = btn.dataset.actType;
-                renderActivity(); renderUnis(); renderStacked(); updateHints();
-            });
-        });
+        typeBtns.forEach(function (btn) { btn.addEventListener('click', function () { typeBtns.forEach(function (b) { b.classList.remove('is-active'); }); btn.classList.add('is-active'); state.chartType = btn.dataset.actType; renderActivity(); renderUnis(); renderStacked(); updateHints(); }); });
 
         var chip = document.getElementById('filter-chip');
-        if (chip) chip.addEventListener('click', function () {
-            state.phaseId = null; state.uniId = null; refreshAll();
-        });
+        if (chip) chip.addEventListener('click', function () { state.phaseId = null; state.uniId = null; refreshAll(); });
 
-        document.querySelectorAll('.map-legend__item').forEach(function (li) {
-            li.addEventListener('click', function () {
-                var pid = parseInt(li.dataset.phaseId, 10);
-                state.phaseId = (state.phaseId === pid) ? null : pid;
-                refreshAll();
-            });
-        });
+        document.querySelectorAll('.map-legend__item').forEach(function (li) { li.addEventListener('click', function () { var pid = parseInt(li.dataset.phaseId, 10); state.phaseId = (state.phaseId === pid) ? null : pid; refreshAll(); }); });
 
         var mapWrap = document.querySelector('.russia-map-wrap');
         var mapInfo = document.getElementById('map-info');
         if (mapWrap && mapInfo) {
-            var infoPhase    = document.getElementById('map-info-phase');
-            var infoName     = document.getElementById('map-info-name');
+            var infoPhase = document.getElementById('map-info-phase');
+            var infoName = document.getElementById('map-info-name');
             var infoProjects = document.getElementById('map-info-projects');
             mapWrap.querySelectorAll('.uni-point').forEach(function (g) {
                 var uid = parseInt(g.dataset.uniId, 10);
@@ -3968,10 +2846,7 @@ $studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): ar
                     mapInfo.classList.add('is-visible');
                 });
                 g.addEventListener('mouseleave', function () { mapInfo.classList.remove('is-visible'); });
-                g.addEventListener('click', function () {
-                    state.uniId = (state.uniId === uid) ? null : uid;
-                    refreshAll();
-                });
+                g.addEventListener('click', function () { state.uniId = (state.uniId === uid) ? null : uid; refreshAll(); });
             });
         }
     })();
