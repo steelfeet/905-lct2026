@@ -6,11 +6,10 @@
  *   - supervisor: сводный дашборд;
  *   - manager: рабочий процесс + сетка проектов + «Статистика студентов»
  *     при фазе «Ведение занятий» (11);
- *   - university: рабочие процессы вуза + матрица студентов и их проектных фаз;
+ *   - university: рабочие процессы вуза + вкладки «Проект» (история фаз
+ *     студентов с возможными возвратами) и «Журнал» (классическая
+ *     классно-урочная система: даты в столбцах, оценки/·/н в ячейках);
  *   - student: карточка своего проекта с этапами и git-историей.
- *
- * Студенческий проект: Выбор темы → Работа над проектом →
- * Предварительная защита → Защита проекта.
  */
 
 session_start();
@@ -229,7 +228,7 @@ $universityMarks = [
     5  => ['code' => 'НГУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1c/Novosibirsk_State_University_logo.svg/60px-Novosibirsk_State_University_logo.svg.png'],
     6  => ['code' => 'УрФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Ural_Federal_University_Logo.svg/60px-Ural_Federal_University_Logo.svg.png'],
     7  => ['code' => 'ЮФУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Southern_Federal_University_logo.svg/60px-Southern_Federal_University_logo.svg.png'],
-    8  => ['code' => 'ДВФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Far_Eastern_Federal_University_Logo.svg/60px-Far_Eastern_Federal_University_logo.svg.png'],
+    8  => ['code' => 'ДВФУ',   'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Far_Eastern_Federal_University_Logo.svg/60px-Far_Eastern_Federal_University_Logo.svg.png'],
     9  => ['code' => 'ТПУ',    'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/TPU_logo.svg/60px-TPU_logo.svg.png'],
     10 => ['code' => 'КНИТУ-КАИ', 'crest' => 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Kazan_National_Research_Technical_University_logo.svg/60px-Kazan_National_Research_Technical_University_logo.svg.png'],
 ];
@@ -457,25 +456,119 @@ foreach ($studentPhases as $sp) {
 
 // Mock-студенты курса (демо)
 $mockStudents = [
-    ['id' => 1, 'name' => 'Иванов Иван Иванович',       'group' => 'ИУ7-41Б',  'phase' => 2, 'topic' => 'ML-модель для телекома',       'grade' => null],
-    ['id' => 2, 'name' => 'Петрова Анна Сергеевна',     'group' => 'ИУ7-41Б',  'phase' => 3, 'topic' => 'Аналитика оттока клиентов',     'grade' => null],
-    ['id' => 3, 'name' => 'Сидоров Пётр Алексеевич',    'group' => 'ИУ7-42Б',  'phase' => 4, 'topic' => 'Чат-бот поддержки на LLM',      'grade' => 5],
-    ['id' => 4, 'name' => 'Кузнецова Мария Дмитриевна', 'group' => 'ИУ7-42Б',  'phase' => 2, 'topic' => 'Прогноз нагрузки сети',         'grade' => null],
-    ['id' => 5, 'name' => 'Смирнов Олег Викторович',    'group' => 'ИУ7-43Б',  'phase' => 1, 'topic' => '—',                              'grade' => null],
-    ['id' => 6, 'name' => 'Волкова Ольга Игоревна',     'group' => 'ИУ7-43Б',  'phase' => 3, 'topic' => 'Дашборд качества связи',        'grade' => null],
-    ['id' => 7, 'name' => 'Никитин Артём Павлович',     'group' => 'ИУ7-44Б',  'phase' => 4, 'topic' => 'Классификация обращений',       'grade' => 4],
-    ['id' => 8, 'name' => 'Морозова Дарья Ивановна',    'group' => 'ИУ7-44Б',  'phase' => 2, 'topic' => 'Рекомендации тарифов',          'grade' => null],
-    ['id' => 9, 'name' => 'Федотов Кирилл Андреевич',   'group' => 'ИУ7-45Б',  'phase' => 1, 'topic' => '—',                              'grade' => null],
-    ['id' => 10,'name' => 'Романова Елизавета Олеговна','group' => 'ИУ7-45Б',  'phase' => 3, 'topic' => 'Оптимизация маршрутизации',     'grade' => null],
+    ['id' => 1, 'name' => 'Иванов Иван Иванович',       'group' => 'ИУ7-41Б',  'topic' => 'ML-модель для телекома'],
+    ['id' => 2, 'name' => 'Петрова Анна Сергеевна',     'group' => 'ИУ7-41Б',  'topic' => 'Аналитика оттока клиентов'],
+    ['id' => 3, 'name' => 'Сидоров Пётр Алексеевич',    'group' => 'ИУ7-42Б',  'topic' => 'Чат-бот поддержки на LLM'],
+    ['id' => 4, 'name' => 'Кузнецова Мария Дмитриевна', 'group' => 'ИУ7-42Б',  'topic' => 'Прогноз нагрузки сети'],
+    ['id' => 5, 'name' => 'Смирнов Олег Викторович',    'group' => 'ИУ7-43Б',  'topic' => 'Классификация отзывов'],
+    ['id' => 6, 'name' => 'Волкова Ольга Игоревна',     'group' => 'ИУ7-43Б',  'topic' => 'Дашборд качества связи'],
+    ['id' => 7, 'name' => 'Никитин Артём Павлович',     'group' => 'ИУ7-44Б',  'topic' => 'Классификация обращений'],
+    ['id' => 8, 'name' => 'Морозова Дарья Ивановна',    'group' => 'ИУ7-44Б',  'topic' => 'Рекомендации тарифов'],
+    ['id' => 9, 'name' => 'Федотов Кирилл Андреевич',   'group' => 'ИУ7-45Б',  'topic' => 'Сегментация абонентов'],
+    ['id' => 10,'name' => 'Романова Елизавета Олеговна','group' => 'ИУ7-45Б',  'topic' => 'Оптимизация маршрутизации'],
 ];
 
-// История проекта в стиле git log
+// История проектных фаз каждого студента (с возможными возвратами).
+$mockStudentHistories = [
+    1 => [
+        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: ML-модель для телекома'],
+        ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы над проектом'],
+        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита: замечания по методологии'],
+        ['num' => 2, 'date' => '30.09', 'note' => 'Возврат: доработка методологии'],
+        ['num' => 3, 'date' => '07.10', 'note' => 'Повторная предзащита — принято'],
+    ],
+    2 => [
+        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Аналитика оттока'],
+        ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы'],
+        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита — хорошо'],
+    ],
+    3 => [
+        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Чат-бот на LLM'],
+        ['num' => 2, 'date' => '09.09', 'note' => 'Работа над проектом'],
+        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита'],
+        ['num' => 4, 'date' => '30.09', 'note' => 'Защита проекта — отлично'],
+    ],
+    4 => [
+        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Прогноз нагрузки'],
+        ['num' => 2, 'date' => '09.09', 'note' => 'Сбор данных'],
+        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита: замечания'],
+        ['num' => 2, 'date' => '28.09', 'note' => 'Возврат: доработка модели'],
+        ['num' => 3, 'date' => '05.10', 'note' => 'Предзащита повторно'],
+        ['num' => 4, 'date' => '12.10', 'note' => 'Защита проекта'],
+    ],
+    5 => [
+        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы'],
+    ],
+    6 => [
+        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Дашборд качества'],
+        ['num' => 2, 'date' => '09.09', 'note' => 'Прототип дашборда'],
+        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита — принято'],
+        ['num' => 4, 'date' => '07.10', 'note' => 'Защита'],
+    ],
+    7 => [
+        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Классификация'],
+        ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы'],
+        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита'],
+        ['num' => 2, 'date' => '30.09', 'note' => 'Возврат: доработка признаков'],
+        ['num' => 3, 'date' => '07.10', 'note' => 'Повторная предзащита'],
+        ['num' => 4, 'date' => '14.10', 'note' => 'Защита — хорошо'],
+    ],
+    8 => [
+        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Рекомендации тарифов'],
+        ['num' => 2, 'date' => '12.09', 'note' => 'Сбор датасета'],
+        ['num' => 3, 'date' => '26.09', 'note' => 'Предзащита — принято'],
+    ],
+    9 => [
+        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Сегментация'],
+    ],
+    10 => [
+        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Оптимизация маршрутизации'],
+        ['num' => 2, 'date' => '12.09', 'note' => 'Начало работы'],
+        ['num' => 3, 'date' => '26.09', 'note' => 'Предзащита'],
+        ['num' => 2, 'date' => '03.10', 'note' => 'Возврат: нет данных для валидации'],
+    ],
+];
+
+// Git-история (демо, для роли студента и менеджера)
 $mockGitHistory = [
     ['hash' => 'a3f9c12', 'date' => '20.09 14:23', 'author' => 'Иванов И.И.',      'message' => 'Добавлен раздел «Введение»'],
     ['hash' => 'b7e2a45', 'date' => '19.09 18:07', 'author' => 'Иванов И.И.',      'message' => 'Постановка задачи и цели работы'],
     ['hash' => 'c1d4f88', 'date' => '19.09 11:52', 'author' => 'Преподаватель',    'message' => 'Ревью: рекомендации по структуре'],
     ['hash' => 'd92b8e1', 'date' => '18.09 20:31', 'author' => 'Иванов И.И.',      'message' => 'Инициализация репозитория и README'],
     ['hash' => 'e45a3c7', 'date' => '18.09 12:00', 'author' => 'ИТ Школа РТК',     'message' => 'Создание шаблона курсового проекта'],
+];
+
+// =============================================================================
+// Журнал (классическая классно-урочная система)
+// =============================================================================
+
+$journalDates = ['03.09', '05.09', '10.09', '12.09', '17.09', '19.09', '24.09', '26.09', '01.10', '03.10'];
+
+$journalLessons = [
+    0 => ['topic' => 'Введение в машинное обучение',       'homework' => 'Прочитать главу 1, ответить на вопросы'],
+    1 => ['topic' => 'Линейная регрессия',                 'homework' => 'Реализовать линейную регрессию с нуля'],
+    2 => ['topic' => 'Логистическая регрессия',            'homework' => 'Разобрать примеры, выполнить задание 2'],
+    3 => ['topic' => 'Деревья решений',                    'homework' => 'Построить дерево на датасете Iris'],
+    4 => ['topic' => 'Ансамбли: Random Forest',            'homework' => 'Сравнить Random Forest и одиночное дерево'],
+    5 => ['topic' => 'Градиентный бустинг',                'homework' => 'Применить XGBoost на учебном датасете'],
+    6 => ['topic' => 'Кластеризация: K-means',             'homework' => 'Кластеризовать клиентов по RFM'],
+    7 => ['topic' => 'PCA и снижение размерности',         'homework' => 'Применить PCA к датасету, визуализировать'],
+    8 => ['topic' => 'Метрики качества',                   'homework' => 'Рассчитать precision/recall на своём проекте'],
+    9 => ['topic' => 'Семинар: разбор проектов',           'homework' => 'Подготовить отчёт по проекту'],
+];
+
+// Оценки: '5','4','3','2' — оценка; '·' — присутствовал без оценки; 'н' — отсутствовал
+$journalMarks = [
+    1  => ['5', '·', '4', '·', '5', '·', '4', 'н', '5', '·'],
+    2  => ['·', '5', '·', '5', '4', '·', '5', '5', '·', '4'],
+    3  => ['4', '4', '·', '·', 'н', '4', '5', '5', '5', '5'],
+    4  => ['5', '·', '5', '5', '·', '·', '4', '4', 'н', '5'],
+    5  => ['·', '·', 'н', '4', '·', '4', '·', '·', '4', '4'],
+    6  => ['4', '5', '5', '·', '5', '5', '·', '4', '5', '·'],
+    7  => ['5', '·', '·', '4', '5', 'н', '5', '5', '·', '5'],
+    8  => ['·', '4', '4', '·', '·', '5', '4', 'н', '·', '4'],
+    9  => ['3', '·', 'н', '·', '4', '·', '·', '4', '4', '·'],
+    10 => ['4', '5', '·', '5', '5', '4', '5', '5', '·', '5'],
 ];
 
 // =============================================================================
@@ -543,7 +636,6 @@ foreach ($universities as $u) {
 usort($topUniversities, function ($a, $b) { return $b['count'] - $a['count']; });
 $topUniversities = array_slice($topUniversities, 0, 8);
 
-// Помесячные mock-данные
 $monthsRu = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 $nowMonth = (int) date('n');
 
@@ -578,7 +670,6 @@ for ($i = 11; $i >= 0; $i--) {
     ];
 }
 
-// Карта
 $mapViewWidth  = 1000;
 $mapViewHeight = 500;
 $lngMin = 19.0;  $lngMax = 180.0;
@@ -707,7 +798,7 @@ $managerLabel = $currentUser !== null
     ? ($currentUser['full_name'] ?: $currentUser['login'])
     : 'Павел';
 
-// Для роли «Студент» — выбранный студент
+// Для роли «Студент»
 $viewStudentId = (int) ($_GET['student_id'] ?? 0);
 if ($viewRole === 'student' && $viewStudentId === 0 && $mockStudents !== []) {
     $viewStudentId = (int) $mockStudents[0]['id'];
@@ -719,6 +810,14 @@ foreach ($mockStudents as $s) {
         break;
     }
 }
+
+// Текущая фаза студента = последний элемент его истории
+$studentCurrentPhase = function (int $studentId) use ($mockStudentHistories): array {
+    if (empty($mockStudentHistories[$studentId])) {
+        return ['num' => 0, 'note' => '', 'date' => ''];
+    }
+    return end($mockStudentHistories[$studentId]);
+};
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -864,13 +963,8 @@ foreach ($mockStudents as $s) {
             overflow: hidden;
         }
 
-        .role-switch__row {
-            display: flex;
-        }
-
-        .role-switch__row + .role-switch__row {
-            border-top: 1px solid rgba(26, 26, 26, 0.18);
-        }
+        .role-switch__row { display: flex; }
+        .role-switch__row + .role-switch__row { border-top: 1px solid rgba(26, 26, 26, 0.18); }
 
         .role-switch__btn {
             display: inline-flex;
@@ -893,13 +987,7 @@ foreach ($mockStudents as $s) {
         .role-switch__btn.active { background-color: var(--color-accent); color: var(--color-white); }
         .role-switch__btn.active:hover { color: var(--color-white); }
 
-        .role-switch__emoji {
-            font-size: 1rem;
-            line-height: 1;
-            flex-shrink: 0;
-            filter: saturate(0.9);
-        }
-
+        .role-switch__emoji { font-size: 1rem; line-height: 1; flex-shrink: 0; filter: saturate(0.9); }
         .role-switch__label { white-space: nowrap; }
 
         .topbar__logout {
@@ -990,6 +1078,7 @@ foreach ($mockStudents as $s) {
         .panel--matrix { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
         .panel--dashboard { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
         .panel--students { flex: 0 0 auto; display: flex; flex-direction: column; }
+        .panel--tabs { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
         .panel__head {
             display: flex;
@@ -1471,6 +1560,529 @@ foreach ($mockStudents as $s) {
         .legend__item { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--color-secondary); }
         .legend__swatch { width: 16px; height: 16px; border: 1px solid rgba(26, 26, 26, 0.2); flex-shrink: 0; border-radius: 2px; }
 
+        /* ===== Табы ===== */
+        .tabs {
+            display: flex;
+            gap: 2px;
+            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
+            margin-bottom: var(--space-md);
+        }
+
+        .tab {
+            padding: 10px 20px;
+            font-family: var(--font-sans);
+            font-size: 0.9rem;
+            font-weight: 500;
+            border: 1px solid transparent;
+            border-bottom: none;
+            background: transparent;
+            color: var(--color-secondary);
+            cursor: pointer;
+            transition: var(--transition-base);
+            border-radius: 2px 2px 0 0;
+            position: relative;
+            top: 1px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tab:hover { background: rgba(139, 105, 20, 0.06); color: var(--color-primary); }
+
+        .tab.is-active {
+            background: var(--color-white);
+            color: var(--color-primary);
+            border-color: rgba(26, 26, 26, 0.1);
+            border-bottom: 1px solid var(--color-white);
+            font-weight: 600;
+        }
+
+        .tab.is-active::after {
+            content: '';
+            position: absolute;
+            left: 10px;
+            right: 10px;
+            bottom: -1px;
+            height: 3px;
+            background: var(--color-accent);
+        }
+
+        .tab-content { display: none; flex: 1; min-height: 0; flex-direction: column; }
+        .tab-content.is-active { display: flex; }
+
+        /* ===== История фаз студента (timeline) ===== */
+        .phase-timeline-wrap {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            border: 1px solid rgba(26, 26, 26, 0.1);
+            background: var(--color-white);
+        }
+
+        table.students-timeline {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.82rem;
+        }
+
+        table.students-timeline th,
+        table.students-timeline td {
+            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
+            padding: 10px 12px;
+            vertical-align: middle;
+        }
+
+        table.students-timeline thead th {
+            background-color: var(--color-primary);
+            color: #fff;
+            font-weight: 500;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+        table.students-timeline thead th:first-child { width: 240px; }
+
+        table.students-timeline tbody tr:hover { background-color: rgba(139, 105, 20, 0.04); }
+
+        table.students-timeline td.student-name {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        table.students-timeline td.student-name .student-sub {
+            display: block;
+            font-weight: 400;
+            font-size: 0.7rem;
+            color: var(--color-tertiary);
+        }
+
+        .phase-timeline {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            padding: 4px 0;
+        }
+
+        .phase-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 9px;
+            border-radius: 2px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #fff;
+            white-space: nowrap;
+            flex-shrink: 0;
+            background: var(--phase-color);
+            background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+            position: relative;
+            cursor: default;
+        }
+
+        .phase-chip::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: 50%;
+            width: 14px;
+            height: 5px;
+            margin-left: -7px;
+            background: rgba(255, 255, 255, 0.55);
+            border-radius: 1px;
+        }
+
+        .phase-chip__num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.2);
+            font-size: 0.65rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .phase-chip__date {
+            font-size: 0.65rem;
+            font-weight: 400;
+            opacity: 0.92;
+        }
+
+        .phase-arrow {
+            color: var(--color-tertiary);
+            font-size: 0.85rem;
+            flex-shrink: 0;
+            line-height: 1;
+            padding: 0 1px;
+        }
+
+        .phase-arrow--return {
+            color: #b45309;
+            font-weight: 700;
+        }
+
+        .phase-timeline-empty {
+            font-size: 0.78rem;
+            color: var(--color-tertiary);
+            font-style: italic;
+        }
+
+        /* ===== Журнал ===== */
+        .journal-wrap {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            border: 1px solid rgba(26, 26, 26, 0.1);
+            background: var(--color-white);
+            margin-bottom: var(--space-sm);
+        }
+
+        table.journal {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.82rem;
+            table-layout: fixed;
+        }
+
+        table.journal th,
+        table.journal td {
+            border-right: 1px solid rgba(26, 26, 26, 0.1);
+            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
+            padding: 6px 4px;
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        table.journal thead th {
+            background-color: var(--color-primary);
+            color: #fff;
+            font-weight: 500;
+            font-size: 0.72rem;
+            letter-spacing: 0.04em;
+            padding: 8px 4px;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        table.journal thead th:first-child {
+            text-align: left;
+            cursor: default;
+            width: 220px;
+            z-index: 3;
+        }
+
+        table.journal thead th[data-date-index]:hover {
+            background-color: var(--color-accent-dark);
+        }
+
+        table.journal thead th.is-selected {
+            background-color: var(--color-accent);
+            box-shadow: inset 0 -3px 0 var(--color-accent-dark);
+        }
+
+        table.journal tbody td:first-child {
+            text-align: left;
+            font-weight: 500;
+            background-color: var(--color-light);
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        table.journal tbody tr:hover td:not(:first-child) {
+            background-color: rgba(139, 105, 20, 0.04);
+        }
+
+        table.journal td.journal-cell {
+            padding: 4px;
+        }
+
+        table.journal td.journal-cell.is-highlighted {
+            background-color: rgba(139, 105, 20, 0.1);
+        }
+
+        .journal-mark {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 24px;
+            height: 24px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            border-radius: 2px;
+        }
+
+        .journal-mark--grade-5 { color: #16a34a; }
+        .journal-mark--grade-4 { color: #2563eb; }
+        .journal-mark--grade-3 { color: #d97706; }
+        .journal-mark--grade-2 { color: #dc2626; }
+        .journal-mark--dot { color: var(--color-accent); font-size: 1rem; }
+        .journal-mark--absent {
+            color: #dc2626;
+            font-weight: 700;
+            background-color: rgba(220, 38, 38, 0.08);
+        }
+
+        .journal-lesson {
+            padding: var(--space-md);
+            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
+            border-left: 4px solid var(--color-accent);
+            transition: all 0.2s ease-out;
+            min-height: 90px;
+        }
+
+        .journal-lesson__date {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-accent-dark);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .journal-lesson__title {
+            font-family: var(--font-serif);
+            font-size: 1.15rem;
+            font-weight: 500;
+            line-height: 1.25;
+            color: var(--color-primary);
+            margin-bottom: 8px;
+        }
+
+        .journal-lesson__homework {
+            font-size: 0.85rem;
+            color: var(--color-secondary);
+            line-height: 1.5;
+        }
+
+        .journal-lesson__homework strong { color: var(--color-accent-dark); font-weight: 600; }
+
+        .journal-lesson--empty .journal-lesson__title {
+            color: var(--color-tertiary);
+            font-size: 0.95rem;
+            font-family: var(--font-sans);
+            font-weight: 400;
+        }
+
+        /* ===== Статистика студентов (у менеджера) ===== */
+        .students-layout {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: var(--space-md);
+            align-items: start;
+        }
+
+        @media (max-width: 1100px) { .students-layout { grid-template-columns: 1fr; } }
+
+        .students-block { background: var(--color-white); }
+
+        .git-history {
+            background: #1a1a1a;
+            border-radius: 3px;
+            padding: 12px 0;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #d4d4d4;
+            line-height: 1.5;
+            overflow: hidden;
+        }
+
+        .git-history__header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 14px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 8px;
+            color: #8b6914;
+            font-weight: 500;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .git-history__branch {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 1px 8px;
+            border-radius: 10px;
+            background: rgba(139, 105, 20, 0.2);
+            color: #d4b35a;
+            font-size: 0.68rem;
+            letter-spacing: 0.02em;
+            text-transform: none;
+        }
+
+        .git-history__list { display: flex; flex-direction: column; padding: 0 4px; }
+
+        .git-history__item {
+            display: grid;
+            grid-template-columns: 12px 70px 1fr;
+            gap: 10px;
+            padding: 5px 10px;
+            border-radius: 2px;
+            transition: background 0.15s;
+            align-items: baseline;
+        }
+
+        .git-history__item:hover { background: rgba(255, 255, 255, 0.04); }
+
+        .git-history__graph {
+            position: relative;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .git-history__graph::before {
+            content: '';
+            position: absolute;
+            top: -5px;
+            bottom: -5px;
+            left: 50%;
+            width: 1px;
+            background: rgba(139, 105, 20, 0.4);
+            margin-left: -0.5px;
+        }
+
+        .git-history__item:first-child .git-history__graph::before { top: 50%; }
+        .git-history__item:last-child .git-history__graph::before { bottom: 50%; }
+
+        .git-history__dot {
+            position: relative;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #8b6914;
+            z-index: 1;
+            box-shadow: 0 0 0 2px #1a1a1a;
+        }
+
+        .git-history__item:first-child .git-history__dot {
+            background: #d4b35a;
+            box-shadow: 0 0 0 2px #1a1a1a, 0 0 8px rgba(212, 179, 90, 0.5);
+        }
+
+        .git-history__hash { color: #8b6914; font-size: 0.7rem; letter-spacing: 0.02em; }
+
+        .git-history__content { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+        .git-history__msg {
+            color: #e5e5e5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .git-history__meta { color: rgba(255, 255, 255, 0.45); font-size: 0.68rem; }
+
+        /* ===== Студенческий вид ===== */
+        .student-card { display: flex; flex-direction: column; gap: var(--space-md); }
+
+        .student-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-md);
+            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
+            border: 1px solid rgba(139, 105, 20, 0.2);
+            border-left: 4px solid var(--color-accent);
+        }
+
+        .student-header__avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--color-accent);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-serif);
+            font-size: 1.5rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .student-header__info { flex: 1; }
+        .student-header__name { font-family: var(--font-serif); font-size: 1.4rem; font-weight: 500; line-height: 1.1; }
+        .student-header__meta { font-size: 0.82rem; color: var(--color-tertiary); margin-top: 4px; }
+        .student-header__topic { font-size: 0.9rem; color: var(--color-accent-dark); margin-top: 6px; font-weight: 500; }
+
+        .student-phases {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        @media (max-width: 900px) { .student-phases { grid-template-columns: repeat(2, 1fr); } }
+
+        .student-phase-step {
+            position: relative;
+            padding: 14px 14px 14px 46px;
+            background: #fff;
+            border: 1px solid rgba(26, 26, 26, 0.12);
+            border-left: 4px solid rgba(26, 26, 26, 0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-height: 96px;
+        }
+
+        .student-phase-step__num {
+            position: absolute;
+            left: 10px;
+            top: 14px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(26, 26, 26, 0.06);
+            color: var(--color-tertiary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-serif);
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .student-phase-step__name { font-weight: 500; font-size: 0.9rem; line-height: 1.25; }
+        .student-phase-step__status { margin-top: auto; font-size: 0.72rem; font-weight: 500; padding: 2px 8px; align-self: flex-start; border: 1px solid; border-radius: 2px; }
+
+        .student-phase-step--done { border-left-color: #16a34a; }
+        .student-phase-step--done .student-phase-step__num { background: rgba(22, 163, 74, 0.15); color: #15803d; }
+        .student-phase-step--done .student-phase-step__status { border-color: #16a34a; color: #15803d; }
+
+        .student-phase-step--current { border-left-color: #2563eb; box-shadow: 0 0 0 1px #2563eb inset, 0 4px 12px rgba(37, 99, 235, 0.08); }
+        .student-phase-step--current .student-phase-step__num { background: #2563eb; color: #fff; }
+        .student-phase-step--current .student-phase-step__status { border-color: #2563eb; color: #1d4ed8; }
+
+        .student-phase-step--pending { opacity: 0.7; }
+        .student-phase-step--pending .student-phase-step__status { border-color: rgba(26, 26, 26, 0.2); color: var(--color-tertiary); }
+
         /* ===== Дашборд руководителя ===== */
         .kpi-row {
             display: grid;
@@ -1489,10 +2101,7 @@ foreach ($mockStudents as $s) {
             transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
         }
 
-        .kpi-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(139, 105, 20, 0.12);
-        }
+        .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(139, 105, 20, 0.12); }
 
         .kpi-card::after {
             content: '';
@@ -1591,7 +2200,6 @@ foreach ($mockStudents as $s) {
         .dash-card__body { flex: 1; min-height: 200px; position: relative; }
         .dash-card canvas { width: 100% !important; height: 100% !important; cursor: pointer; display: block; }
 
-        /* ===== SVG-карта ===== */
         .russia-map-wrap {
             position: relative;
             flex: 1;
@@ -1619,14 +2227,7 @@ foreach ($mockStudents as $s) {
 
         .uni-point__dot { transition: r 0.25s ease-out, filter 0.25s, fill 0.3s; transform-origin: center; }
         .uni-point__halo { transition: opacity 0.3s, r 0.3s, fill 0.3s; }
-
-        .uni-point__pulse {
-            fill: none;
-            stroke-width: 2;
-            opacity: 0;
-            transition: opacity 0.2s, stroke 0.3s;
-            pointer-events: none;
-        }
+        .uni-point__pulse { fill: none; stroke-width: 2; opacity: 0; transition: opacity 0.2s, stroke 0.3s; pointer-events: none; }
 
         .uni-point__label {
             font-family: var(--font-sans);
@@ -1638,7 +2239,6 @@ foreach ($mockStudents as $s) {
             stroke-width: 3px;
             stroke-linejoin: round;
             pointer-events: none;
-            transition: opacity 0.25s;
         }
 
         .uni-point.is-dimmed .uni-point__label { opacity: 0.2; }
@@ -1701,347 +2301,16 @@ foreach ($mockStudents as $s) {
         .map-legend__item.is-active { background: rgba(139, 105, 20, 0.2); font-weight: 600; }
         .map-legend__dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.15); }
 
-        /* ===== Статистика студентов (новая секция) ===== */
-        .students-layout {
-            display: grid;
-            grid-template-columns: 1fr 340px;
-            gap: var(--space-md);
-            align-items: start;
-        }
-
         @media (max-width: 1100px) {
-            .students-layout { grid-template-columns: 1fr; }
+            .dash-grid { grid-template-columns: 1fr 1fr; }
+            .dash-card--wide { grid-column: span 2; }
+            .dash-card--map { grid-column: span 2; }
         }
 
-        .students-block {
-            background: var(--color-white);
+        @media (max-width: 720px) {
+            .dash-grid { grid-template-columns: 1fr; }
+            .dash-card--wide, .dash-card--map { grid-column: span 1; }
         }
-
-        table.students-table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 0.82rem;
-            table-layout: fixed;
-        }
-
-        table.students-table th,
-        table.students-table td {
-            border-right: 1px solid rgba(26, 26, 26, 0.1);
-            border-bottom: 1px solid rgba(26, 26, 26, 0.1);
-            padding: 6px 8px;
-            text-align: left;
-            vertical-align: middle;
-        }
-
-        table.students-table thead th {
-            background-color: var(--color-primary);
-            color: #fff;
-            font-weight: 500;
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            text-align: center;
-            padding: 8px 6px;
-        }
-
-        table.students-table thead th:first-child {
-            text-align: left;
-        }
-
-        table.students-table tbody tr:hover {
-            background-color: rgba(139, 105, 20, 0.04);
-        }
-
-        table.students-table tbody tr.is-selected {
-            background-color: rgba(139, 105, 20, 0.1);
-            box-shadow: inset 3px 0 0 var(--color-accent);
-        }
-
-        table.students-table td.student-name {
-            font-weight: 500;
-            cursor: pointer;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        table.students-table td.student-name .student-sub {
-            display: block;
-            font-weight: 400;
-            font-size: 0.7rem;
-            color: var(--color-tertiary);
-        }
-
-        table.students-table td.student-phase {
-            text-align: center;
-            padding: 4px;
-            width: 90px;
-        }
-
-        .student-sticker {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            min-height: 34px;
-            border-radius: 2px;
-            background: var(--phase-color, #e5e7eb);
-            background-image: linear-gradient(
-                180deg,
-                rgba(255, 255, 255, 0.35) 0%,
-                rgba(0, 0, 0, 0.10) 100%
-            );
-            color: #fff;
-            font-weight: 700;
-            font-size: 0.78rem;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-            box-shadow:
-                0 1px 2px rgba(0, 0, 0, 0.15),
-                0 2px 6px rgba(0, 0, 0, 0.06);
-            transition: transform 0.15s;
-        }
-
-        .student-phase--completed .student-sticker {
-            background-color: var(--phase-color);
-            opacity: 0.55;
-        }
-
-        .student-phase--current .student-sticker {
-            background-color: var(--phase-color);
-            transform: scale(1.05);
-            box-shadow:
-                0 3px 6px rgba(0, 0, 0, 0.2),
-                0 6px 14px rgba(0, 0, 0, 0.1),
-                inset 0 0 0 2px rgba(255, 255, 255, 0.7);
-        }
-
-        .student-phase--future .student-sticker {
-            background-color: transparent;
-            background-image: none;
-            color: rgba(26, 26, 26, 0.18);
-            box-shadow: none;
-            border: 1px dashed rgba(26, 26, 26, 0.15);
-            text-shadow: none;
-            font-weight: 400;
-        }
-
-        .student-phase--future .student-sticker::after {
-            content: '—';
-        }
-
-        .student-phase--future .student-sticker > span {
-            display: none;
-        }
-
-        /* Git-история */
-        .git-history {
-            background: #1a1a1a;
-            border-radius: 3px;
-            padding: 12px 0;
-            font-family: var(--font-mono);
-            font-size: 0.75rem;
-            color: #d4d4d4;
-            line-height: 1.5;
-            overflow: hidden;
-        }
-
-        .git-history__header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 0 14px 10px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            margin-bottom: 8px;
-            color: #8b6914;
-            font-weight: 500;
-            font-size: 0.72rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
-
-        .git-history__branch {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 1px 8px;
-            border-radius: 10px;
-            background: rgba(139, 105, 20, 0.2);
-            color: #d4b35a;
-            font-size: 0.68rem;
-            letter-spacing: 0.02em;
-            text-transform: none;
-        }
-
-        .git-history__list {
-            display: flex;
-            flex-direction: column;
-            padding: 0 4px;
-        }
-
-        .git-history__item {
-            display: grid;
-            grid-template-columns: 12px 70px 1fr;
-            gap: 10px;
-            padding: 5px 10px;
-            border-radius: 2px;
-            transition: background 0.15s;
-            align-items: baseline;
-        }
-
-        .git-history__item:hover { background: rgba(255, 255, 255, 0.04); }
-
-        .git-history__graph {
-            position: relative;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .git-history__graph::before {
-            content: '';
-            position: absolute;
-            top: -5px;
-            bottom: -5px;
-            left: 50%;
-            width: 1px;
-            background: rgba(139, 105, 20, 0.4);
-            margin-left: -0.5px;
-        }
-
-        .git-history__item:first-child .git-history__graph::before { top: 50%; }
-        .git-history__item:last-child .git-history__graph::before { bottom: 50%; }
-
-        .git-history__dot {
-            position: relative;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #8b6914;
-            z-index: 1;
-            box-shadow: 0 0 0 2px #1a1a1a;
-        }
-
-        .git-history__item:first-child .git-history__dot {
-            background: #d4b35a;
-            box-shadow: 0 0 0 2px #1a1a1a, 0 0 8px rgba(212, 179, 90, 0.5);
-        }
-
-        .git-history__hash {
-            color: #8b6914;
-            font-size: 0.7rem;
-            letter-spacing: 0.02em;
-        }
-
-        .git-history__content {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-            min-width: 0;
-        }
-
-        .git-history__msg {
-            color: #e5e5e5;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .git-history__meta {
-            color: rgba(255, 255, 255, 0.45);
-            font-size: 0.68rem;
-        }
-
-        /* ===== Студенческий вид ===== */
-        .student-card {
-            display: flex;
-            flex-direction: column;
-            gap: var(--space-md);
-        }
-
-        .student-header {
-            display: flex;
-            align-items: center;
-            gap: var(--space-md);
-            padding: var(--space-md);
-            background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%);
-            border: 1px solid rgba(139, 105, 20, 0.2);
-            border-left: 4px solid var(--color-accent);
-        }
-
-        .student-header__avatar {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            background: var(--color-accent);
-            color: #fff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: var(--font-serif);
-            font-size: 1.5rem;
-            font-weight: 600;
-            flex-shrink: 0;
-        }
-
-        .student-header__info { flex: 1; }
-        .student-header__name { font-family: var(--font-serif); font-size: 1.4rem; font-weight: 500; line-height: 1.1; }
-        .student-header__meta { font-size: 0.82rem; color: var(--color-tertiary); margin-top: 4px; }
-        .student-header__topic { font-size: 0.9rem; color: var(--color-accent-dark); margin-top: 6px; font-weight: 500; }
-
-        .student-phases {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-        }
-
-        @media (max-width: 900px) {
-            .student-phases { grid-template-columns: repeat(2, 1fr); }
-        }
-
-        .student-phase-step {
-            position: relative;
-            padding: 14px 14px 14px 46px;
-            background: #fff;
-            border: 1px solid rgba(26, 26, 26, 0.12);
-            border-left: 4px solid rgba(26, 26, 26, 0.2);
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            min-height: 96px;
-        }
-
-        .student-phase-step__num {
-            position: absolute;
-            left: 10px;
-            top: 14px;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            background: rgba(26, 26, 26, 0.06);
-            color: var(--color-tertiary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: var(--font-serif);
-            font-weight: 600;
-            font-size: 0.95rem;
-        }
-
-        .student-phase-step__name { font-weight: 500; font-size: 0.9rem; line-height: 1.25; }
-        .student-phase-step__status { margin-top: auto; font-size: 0.72rem; font-weight: 500; padding: 2px 8px; align-self: flex-start; border: 1px solid; border-radius: 2px; }
-
-        .student-phase-step--done { border-left-color: #16a34a; }
-        .student-phase-step--done .student-phase-step__num { background: rgba(22, 163, 74, 0.15); color: #15803d; }
-        .student-phase-step--done .student-phase-step__status { border-color: #16a34a; color: #15803d; }
-
-        .student-phase-step--current { border-left-color: #2563eb; box-shadow: 0 0 0 1px #2563eb inset, 0 4px 12px rgba(37, 99, 235, 0.08); }
-        .student-phase-step--current .student-phase-step__num { background: #2563eb; color: #fff; }
-        .student-phase-step--current .student-phase-step__status { border-color: #2563eb; color: #1d4ed8; }
-
-        .student-phase-step--pending { opacity: 0.7; }
-        .student-phase-step--pending .student-phase-step__status { border-color: rgba(26, 26, 26, 0.2); color: var(--color-tertiary); }
 
         @media (max-width: 900px) { .mainnav { overflow-x: auto; } }
     </style>
@@ -2083,7 +2352,6 @@ foreach ($mockStudents as $s) {
             </div>
             <div class="topbar__user">
                 <div class="role-switch" role="tablist" aria-label="Переключение роли">
-                    <!-- Верхняя строка: руководство -->
                     <div class="role-switch__row">
                         <a class="role-switch__btn <?= $viewRole === 'supervisor' ? 'active' : '' ?>"
                            role="tab"
@@ -2100,7 +2368,6 @@ foreach ($mockStudents as $s) {
                             <span class="role-switch__label"><?= e($managerLabel) ?> · Менеджер</span>
                         </a>
                     </div>
-                    <!-- Нижняя строка: исполнители -->
                     <div class="role-switch__row">
                         <a class="role-switch__btn <?= $viewRole === 'university' ? 'active' : '' ?>"
                            role="tab"
@@ -2190,7 +2457,6 @@ foreach ($mockStudents as $s) {
                     </section>
 
                     <?php if ($currentPhaseNum === 11): ?>
-                        <!-- ===== Статистика студентов (только в фазе 11) ===== -->
                         <section class="panel panel--students">
                             <div class="panel__head">
                                 <div>
@@ -2206,43 +2472,76 @@ foreach ($mockStudents as $s) {
                             <div class="students-layout">
                                 <div class="students-block">
                                     <div style="overflow:auto; border:1px solid rgba(26,26,26,0.1);">
-                                        <table class="students-table">
+                                        <table class="students-timeline">
                                             <thead>
                                                 <tr>
-                                                    <th style="width: 240px;">Студент</th>
-                                                    <?php foreach ($studentPhases as $sp): ?>
-                                                        <th><?= e($sp['name']) ?></th>
-                                                    <?php endforeach; ?>
+                                                    <th>Студент</th>
+                                                    <th>История проектных фаз</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 <?php foreach ($mockStudents as $st): ?>
-                                                    <?php $curPhase = (int) $st['phase']; ?>
+                                                    <?php $history = $mockStudentHistories[(int) $st['id']] ?? []; ?>
                                                     <tr>
                                                         <td class="student-name" title="<?= e($st['name']) ?>">
                                                             <?= e($st['name']) ?>
-                                                            <span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '—' ? ' · ' . e($st['topic']) : '' ?></span>
+                                                            <span class="student-sub"><?= e($st['group']) ?></span>
                                                         </td>
-                                                        <?php foreach ($studentPhases as $sp): ?>
-                                                            <?php
-                                                            $spNum = (int) $sp['num'];
-                                                            $cls = 'student-phase--future';
-                                                            if ($spNum < $curPhase) $cls = 'student-phase--completed';
-                                                            elseif ($spNum === $curPhase) $cls = 'student-phase--current';
-                                                            ?>
-                                                            <td class="student-phase <?= $cls ?>">
-                                                                <span class="student-sticker"
-                                                                      style="--phase-color: <?= e($sp['color']) ?>;"
-                                                                      title="<?= e($st['name']) ?> · <?= e($sp['name']) ?>">
-                                                                    <span><?= $spNum ?></span>
-                                                                </span>
-                                                            </td>
-                                                        <?php endforeach; ?>
+                                                        <td>
+                                                            <?php if (empty($history)): ?>
+                                                                <span class="phase-timeline-empty">Нет записей</span>
+                                                            <?php else: ?>
+                                                                <div class="phase-timeline">
+                                                                    <?php $prevNum = 0; ?>
+                                                                    <?php foreach ($history as $idx => $h): ?>
+                                                                        <?php
+                                                                        $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
+                                                                        if (!$sp) continue;
+                                                                        $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
+                                                                        ?>
+                                                                        <?php if ($idx > 0): ?>
+                                                                            <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"
+                                                                                  title="<?= $isReturn ? 'Возврат к предыдущей фазе' : 'Переход к следующей фазе' ?>">
+                                                                                <?= $isReturn ? '↩' : '→' ?>
+                                                                            </span>
+                                                                        <?php endif; ?>
+                                                                        <span class="phase-chip"
+                                                                              style="--phase-color: <?= e($sp['color']) ?>;"
+                                                                              title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
+                                                                            <span class="phase-chip__num"><?= (int) $sp['num'] ?></span>
+                                                                            <?= e($sp['name']) ?>
+                                                                            <span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                                        </span>
+                                                                        <?php $prevNum = (int) $h['num']; ?>
+                                                                    <?php endforeach; ?>
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </td>
                                                     </tr>
                                                 <?php endforeach; ?>
                                             </tbody>
                                         </table>
                                     </div>
+
+                                    <section class="legend" style="margin-top: var(--space-sm);">
+                                        <h3 class="legend__title">Легенда проектных фаз</h3>
+                                        <div class="legend__items">
+                                            <?php foreach ($studentPhases as $sp): ?>
+                                                <span class="legend__item">
+                                                    <span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span>
+                                                    <?= (int) $sp['num'] ?>. <?= e($sp['name']) ?>
+                                                </span>
+                                            <?php endforeach; ?>
+                                            <span class="legend__item">
+                                                <span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>
+                                                Возврат к предыдущей фазе
+                                            </span>
+                                            <span class="legend__item">
+                                                <span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>
+                                                Переход к следующей фазе
+                                            </span>
+                                        </div>
+                                    </section>
                                 </div>
 
                                 <div class="students-block">
@@ -2489,72 +2788,177 @@ foreach ($mockStudents as $s) {
                         </div>
                     </section>
 
-                    <!-- ===== Матрица студентов (аналогично менеджеру) ===== -->
-                    <section class="panel panel--students" style="flex:1 1 auto; min-height:0; display:flex; flex-direction:column;">
-                        <div class="panel__head">
-                            <div>
-                                <h2 class="panel__title">Студенты и их проектные фазы</h2>
-                                <p class="panel__subtitle">
-                                    Строки — студенты, столбцы — фазы курсового проекта.
-                                    Клик по студенту — выбрать (как у менеджера).
-                                </p>
-                            </div>
+                    <!-- ===== Вкладки: Проект | Журнал ===== -->
+                    <section class="panel panel--tabs">
+                        <div class="tabs" role="tablist">
+                            <button class="tab is-active" data-tab="project" role="tab" aria-selected="true">
+                                📋 Проект
+                            </button>
+                            <button class="tab" data-tab="journal" role="tab" aria-selected="false">
+                                📓 Журнал
+                            </button>
                         </div>
 
-                        <div style="flex:1; min-height:0; overflow:auto; border:1px solid rgba(26,26,26,0.1);">
-                            <table class="students-table">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 240px;">Студент</th>
-                                        <?php foreach ($studentPhases as $sp): ?>
-                                            <th><?= (int) $sp['num'] ?>. <?= e($sp['name']) ?></th>
-                                        <?php endforeach; ?>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($mockStudents as $st): ?>
-                                        <?php $curPhase = (int) $st['phase']; ?>
-                                        <tr data-student="<?= (int) $st['id'] ?>" class="clickable-row" style="cursor:pointer;">
-                                            <td class="student-name" title="<?= e($st['name']) ?>">
-                                                <?= e($st['name']) ?>
-                                                <span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '—' ? ' · ' . e($st['topic']) : '' ?></span>
-                                            </td>
-                                            <?php foreach ($studentPhases as $sp): ?>
-                                                <?php
-                                                $spNum = (int) $sp['num'];
-                                                $cls = 'student-phase--future';
-                                                if ($spNum < $curPhase) $cls = 'student-phase--completed';
-                                                elseif ($spNum === $curPhase) $cls = 'student-phase--current';
-                                                ?>
-                                                <td class="student-phase <?= $cls ?>">
-                                                    <span class="student-sticker"
-                                                          style="--phase-color: <?= e($sp['color']) ?>;"
-                                                          title="<?= e($st['name']) ?> · <?= e($sp['name']) ?>">
-                                                        <span><?= $spNum ?></span>
-                                                    </span>
+                        <!-- ===== Вкладка «Проект» ===== -->
+                        <div class="tab-content is-active" data-tab-content="project" role="tabpanel">
+                            <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap: var(--space-sm); margin-bottom: var(--space-sm);">
+                                <div>
+                                    <h2 class="panel__title" style="font-size:1.2rem;">История проектных фаз студентов</h2>
+                                    <p class="panel__subtitle">
+                                        Каждый студент проходит свой путь по фазам.
+                                        Возможны возвраты к предыдущим фазам (↩) — например, доработка после замечаний.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="phase-timeline-wrap">
+                                <table class="students-timeline">
+                                    <thead>
+                                        <tr>
+                                            <th>Студент</th>
+                                            <th>Хронология фаз</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($mockStudents as $st): ?>
+                                            <?php $history = $mockStudentHistories[(int) $st['id']] ?? []; ?>
+                                            <tr>
+                                                <td class="student-name" title="<?= e($st['name']) ?>">
+                                                    <?= e($st['name']) ?>
+                                                    <span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '' ? ' · ' . e($st['topic']) : '' ?></span>
                                                 </td>
+                                                <td>
+                                                    <?php if (empty($history)): ?>
+                                                        <span class="phase-timeline-empty">Нет записей</span>
+                                                    <?php else: ?>
+                                                        <div class="phase-timeline">
+                                                            <?php $prevNum = 0; ?>
+                                                            <?php foreach ($history as $idx => $h): ?>
+                                                                <?php
+                                                                $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
+                                                                if (!$sp) continue;
+                                                                $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
+                                                                ?>
+                                                                <?php if ($idx > 0): ?>
+                                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"
+                                                                          title="<?= $isReturn ? 'Возврат к предыдущей фазе' : 'Переход к следующей фазе' ?>">
+                                                                        <?= $isReturn ? '↩' : '→' ?>
+                                                                    </span>
+                                                                <?php endif; ?>
+                                                                <span class="phase-chip"
+                                                                      style="--phase-color: <?= e($sp['color']) ?>;"
+                                                                      title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
+                                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span>
+                                                                    <?= e($sp['name']) ?>
+                                                                    <span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                                </span>
+                                                                <?php $prevNum = (int) $h['num']; ?>
+                                                            <?php endforeach; ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <section class="legend" style="margin-top: var(--space-sm);">
+                                <h3 class="legend__title">Легенда проектных фаз</h3>
+                                <div class="legend__items">
+                                    <?php foreach ($studentPhases as $sp): ?>
+                                        <span class="legend__item">
+                                            <span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span>
+                                            <?= (int) $sp['num'] ?>. <?= e($sp['name']) ?>
+                                        </span>
+                                    <?php endforeach; ?>
+                                    <span class="legend__item">
+                                        <span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>
+                                        Возврат к предыдущей фазе
+                                    </span>
+                                    <span class="legend__item">
+                                        <span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>
+                                        Переход к следующей фазе
+                                    </span>
+                                </div>
+                            </section>
+                        </div>
+
+                        <!-- ===== Вкладка «Журнал» ===== -->
+                        <div class="tab-content" data-tab-content="journal" role="tabpanel">
+                            <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap: var(--space-sm); margin-bottom: var(--space-sm);">
+                                <div>
+                                    <h2 class="panel__title" style="font-size:1.2rem;">Журнал занятий</h2>
+                                    <p class="panel__subtitle">
+                                        Классическая классно-урочная система. Клик по дате — тема урока и домашнее задание.
+                                    </p>
+                                </div>
+                                <div class="legend" style="margin:0; padding:6px 12px; background:rgba(139,105,20,0.06);">
+                                    <div class="legend__items" style="gap:0.5rem var(--space-md);">
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-5">5</span> отлично</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-4">4</span> хорошо</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-3">3</span> удовл.</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--grade-2">2</span> неуд.</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--dot">·</span> был</span>
+                                        <span class="legend__item"><span class="journal-mark journal-mark--absent">н</span> отсутствовал</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="journal-wrap">
+                                <table class="journal" id="journal-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Студент</th>
+                                            <?php foreach ($journalDates as $i => $d): ?>
+                                                <th data-date-index="<?= (int) $i ?>"><?= e($d) ?></th>
                                             <?php endforeach; ?>
                                         </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <section class="legend" style="margin-top: var(--space-sm);">
-                            <h3 class="legend__title">Легенда проектных фаз</h3>
-                            <div class="legend__items">
-                                <?php foreach ($studentPhases as $sp): ?>
-                                    <span class="legend__item">
-                                        <span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span>
-                                        <?= (int) $sp['num'] ?>. <?= e($sp['name']) ?>
-                                    </span>
-                                <?php endforeach; ?>
-                                <span class="legend__item">
-                                    <span class="legend__swatch" style="background:transparent; border:1px dashed rgba(26,26,26,0.25)"></span>
-                                    Ещё не начата
-                                </span>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($mockStudents as $st): ?>
+                                            <?php $sid = (int) $st['id']; ?>
+                                            <tr data-student="<?= $sid ?>">
+                                                <td title="<?= e($st['name']) ?>"><?= e($st['name']) ?></td>
+                                                <?php foreach ($journalDates as $i => $d): ?>
+                                                    <?php
+                                                    $mark = $journalMarks[$sid][$i] ?? '';
+                                                    $markClass = '';
+                                                    if ($mark === '5') $markClass = 'journal-mark--grade-5';
+                                                    elseif ($mark === '4') $markClass = 'journal-mark--grade-4';
+                                                    elseif ($mark === '3') $markClass = 'journal-mark--grade-3';
+                                                    elseif ($mark === '2') $markClass = 'journal-mark--grade-2';
+                                                    elseif ($mark === '·') $markClass = 'journal-mark--dot';
+                                                    elseif ($mark === 'н') $markClass = 'journal-mark--absent';
+                                                    ?>
+                                                    <td class="journal-cell" data-date-index="<?= (int) $i ?>">
+                                                        <?php if ($mark !== ''): ?>
+                                                            <span class="journal-mark <?= $markClass ?>"><?= e($mark) ?></span>
+                                                        <?php else: ?>
+                                                            <span class="journal-mark" style="color:rgba(26,26,26,0.15);">—</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                <?php endforeach; ?>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
                             </div>
-                        </section>
+
+                            <!-- Панель урока -->
+                            <div class="journal-lesson journal-lesson--empty" id="journal-lesson">
+                                <div class="journal-lesson__date" id="journal-lesson-date">Урок не выбран</div>
+                                <div class="journal-lesson__title" id="journal-lesson-topic">Выберите дату в журнале, чтобы увидеть тему урока и домашнее задание.</div>
+                                <div class="journal-lesson__homework" id="journal-lesson-homework"></div>
+                            </div>
+
+                            <script type="application/json" id="journal-lessons-json">
+                                <?= json_encode($journalLessons, JSON_UNESCAPED_UNICODE) ?>
+                            </script>
+                            <script type="application/json" id="journal-dates-json">
+                                <?= json_encode($journalDates, JSON_UNESCAPED_UNICODE) ?>
+                            </script>
+                        </div>
                     </section>
                 </div>
             <?php elseif ($viewRole === 'student'): ?>
@@ -2565,6 +2969,11 @@ foreach ($mockStudents as $s) {
                             <?php if ($selectedStudent === null): ?>
                                 <div class="uni-empty">Студент не найден.</div>
                             <?php else: ?>
+                                <?php
+                                $studentHistory = $mockStudentHistories[(int) $selectedStudent['id']] ?? [];
+                                $lastEntry = !empty($studentHistory) ? end($studentHistory) : null;
+                                $curStudentPhase = $lastEntry ? (int) $lastEntry['num'] : 0;
+                                ?>
                                 <div class="student-header">
                                     <div class="student-header__avatar">
                                         <?= e(mb_substr($selectedStudent['name'], 0, 1, 'UTF-8')) ?>
@@ -2572,7 +2981,7 @@ foreach ($mockStudents as $s) {
                                     <div class="student-header__info">
                                         <div class="student-header__name"><?= e($selectedStudent['name']) ?></div>
                                         <div class="student-header__meta">Группа <?= e($selectedStudent['group']) ?> · курс «<?= e($currentProject['title']) ?>»</div>
-                                        <?php if ($selectedStudent['topic'] !== '—'): ?>
+                                        <?php if ($selectedStudent['topic'] !== ''): ?>
                                             <div class="student-header__topic">Тема проекта: <?= e($selectedStudent['topic']) ?></div>
                                         <?php else: ?>
                                             <div class="student-header__topic" style="color:var(--color-tertiary);font-weight:400;">Тема проекта ещё не выбрана</div>
@@ -2581,14 +2990,13 @@ foreach ($mockStudents as $s) {
                                 </div>
 
                                 <div class="student-phases">
-                                    <?php $curPhase = (int) $selectedStudent['phase']; ?>
                                     <?php foreach ($studentPhases as $sp): ?>
                                         <?php
                                         $spNum = (int) $sp['num'];
                                         $cls = 'student-phase-step--pending';
                                         $label = 'Ожидает';
-                                        if ($spNum < $curPhase) { $cls = 'student-phase-step--done'; $label = 'Завершён'; }
-                                        elseif ($spNum === $curPhase) { $cls = 'student-phase-step--current'; $label = 'В работе'; }
+                                        if ($spNum < $curStudentPhase) { $cls = 'student-phase-step--done'; $label = 'Завершён'; }
+                                        elseif ($spNum === $curStudentPhase) { $cls = 'student-phase-step--current'; $label = 'В работе'; }
                                         ?>
                                         <div class="student-phase-step <?= $cls ?>">
                                             <div class="student-phase-step__num"><?= $spNum ?></div>
@@ -2597,6 +3005,35 @@ foreach ($mockStudents as $s) {
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
+
+                                <?php if (!empty($studentHistory)): ?>
+                                    <div class="legend" style="margin:0;">
+                                        <h3 class="legend__title" style="font-size:1rem;">Моя история фаз</h3>
+                                        <div class="phase-timeline">
+                                            <?php $prevNum = 0; ?>
+                                            <?php foreach ($studentHistory as $idx => $h): ?>
+                                                <?php
+                                                $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
+                                                if (!$sp) continue;
+                                                $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
+                                                ?>
+                                                <?php if ($idx > 0): ?>
+                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>">
+                                                        <?= $isReturn ? '↩' : '→' ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                                <span class="phase-chip"
+                                                      style="--phase-color: <?= e($sp['color']) ?>;"
+                                                      title="<?= e($h['note']) ?>">
+                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span>
+                                                    <?= e($sp['name']) ?>
+                                                    <span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                </span>
+                                                <?php $prevNum = (int) $h['num']; ?>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
 
                                 <div class="git-history">
                                     <div class="git-history__header">
@@ -2689,9 +3126,7 @@ foreach ($mockStudents as $s) {
                                     Динамика активности
                                     <span class="dash-card__hint" id="hint-activity">—</span>
                                 </div>
-                                <div class="dash-card__body">
-                                    <canvas id="chart-activity"></canvas>
-                                </div>
+                                <div class="dash-card__body"><canvas id="chart-activity"></canvas></div>
                             </div>
 
                             <div class="dash-card">
@@ -2699,9 +3134,7 @@ foreach ($mockStudents as $s) {
                                     Распределение по фазам
                                     <span class="dash-card__hint" id="hint-phases">—</span>
                                 </div>
-                                <div class="dash-card__body">
-                                    <canvas id="chart-phases"></canvas>
-                                </div>
+                                <div class="dash-card__body"><canvas id="chart-phases"></canvas></div>
                             </div>
 
                             <div class="dash-card">
@@ -2709,9 +3142,7 @@ foreach ($mockStudents as $s) {
                                     Топ вузов
                                     <span class="dash-card__hint" id="hint-unis">—</span>
                                 </div>
-                                <div class="dash-card__body">
-                                    <canvas id="chart-universities"></canvas>
-                                </div>
+                                <div class="dash-card__body"><canvas id="chart-universities"></canvas></div>
                             </div>
 
                             <div class="dash-card dash-card--wide">
@@ -2719,9 +3150,7 @@ foreach ($mockStudents as $s) {
                                     Фазы по вузам
                                     <span class="dash-card__hint" id="hint-stacked">—</span>
                                 </div>
-                                <div class="dash-card__body">
-                                    <canvas id="chart-directions"></canvas>
-                                </div>
+                                <div class="dash-card__body"><canvas id="chart-directions"></canvas></div>
                             </div>
 
                             <div class="dash-card dash-card--map">
@@ -2993,13 +3422,76 @@ foreach ($mockStudents as $s) {
     <script>
     (function () {
         'use strict';
-        var rows = document.querySelectorAll('table.students-table tbody tr[data-student]');
-        rows.forEach(function (tr) {
-            tr.addEventListener('click', function () {
-                rows.forEach(function (r) { r.classList.remove('is-selected'); });
-                tr.classList.add('is-selected');
+
+        // ===== Табы =====
+        var tabs = document.querySelectorAll('.tab[data-tab]');
+        var contents = document.querySelectorAll('.tab-content[data-tab-content]');
+
+        tabs.forEach(function (tab) {
+            tab.addEventListener('click', function () {
+                var target = tab.dataset.tab;
+                tabs.forEach(function (t) {
+                    t.classList.toggle('is-active', t === tab);
+                    t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+                });
+                contents.forEach(function (c) {
+                    c.classList.toggle('is-active', c.dataset.tabContent === target);
+                });
             });
         });
+
+        // ===== Журнал: выбор даты =====
+        var journalTable = document.getElementById('journal-table');
+        if (!journalTable) return;
+
+        var lessonsJson = document.getElementById('journal-lessons-json');
+        var datesJson = document.getElementById('journal-dates-json');
+        if (!lessonsJson || !datesJson) return;
+
+        var lessons = JSON.parse(lessonsJson.textContent);
+        var dates = JSON.parse(datesJson.textContent);
+
+        var headerCells = journalTable.querySelectorAll('thead th[data-date-index]');
+        var cellCells = journalTable.querySelectorAll('tbody td.journal-cell[data-date-index]');
+        var panelDate = document.getElementById('journal-lesson-date');
+        var panelTopic = document.getElementById('journal-lesson-topic');
+        var panelHw = document.getElementById('journal-lesson-homework');
+        var panel = document.getElementById('journal-lesson');
+
+        function selectDate(idx) {
+            headerCells.forEach(function (th) {
+                var i = parseInt(th.dataset.dateIndex, 10);
+                th.classList.toggle('is-selected', i === idx);
+            });
+            cellCells.forEach(function (td) {
+                var i = parseInt(td.dataset.dateIndex, 10);
+                td.classList.toggle('is-highlighted', i === idx);
+            });
+
+            var lesson = lessons[idx];
+            if (lesson) {
+                panel.classList.remove('journal-lesson--empty');
+                panelDate.textContent = 'Дата: ' + (dates[idx] || '—');
+                panelTopic.textContent = lesson.topic;
+                panelHw.innerHTML = '<strong>Домашнее задание:</strong> ' + lesson.homework;
+            } else {
+                panel.classList.add('journal-lesson--empty');
+                panelDate.textContent = 'Урок не выбран';
+                panelTopic.textContent = 'Для выбранной даты ещё нет темы.';
+                panelHw.textContent = '';
+            }
+        }
+
+        headerCells.forEach(function (th) {
+            th.addEventListener('click', function () {
+                selectDate(parseInt(th.dataset.dateIndex, 10));
+            });
+        });
+
+        // Автовыбор первого урока при открытии вкладки
+        if (dates.length > 0) {
+            selectDate(0);
+        }
     })();
     </script>
     <?php endif; ?>
