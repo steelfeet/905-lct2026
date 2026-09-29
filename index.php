@@ -5,13 +5,21 @@
  * Роли (5):
  *   - supervisor: сводный дашборд;
  *   - manager: рабочий процесс + сетка проектов + «Статистика студентов»
- *     при фазе «Ведение занятий» (11): «Проект» и «Сводка по журналу»;
- *   - university: рабочие процессы вуза + вкладки «Проект» и «Журнал»
+ *     при фазе «Ведение занятий» (11): вкладки «Проекты» и «Сводка по журналу»;
+ *   - university: рабочие процессы вуза + вкладки «Проекты» и «Журнал»
  *     + заметки преподавателя + активность родителей;
- *   - student: карточка своего проекта, свои оценки и заметки преподавателя
- *     во вкладке «Журнал», git-история;
- *   - parent: журнал и проектные фазы только своего ребёнка,
+ *   - student: карточки своих проектов (может быть несколько, командные),
+ *     свои оценки и заметки преподавателя в «Журнале»;
+ *   - parent: журнал и проекты только своего ребёнка,
  *     уведомления о плохих отметках, история визитов.
+ *
+ * Особенности структуры проектов:
+ *   - у одного студента может быть несколько проектов в разных фазах;
+ *   - несколько студентов могут работать над одним проектом одновременно;
+ *   - проекты бывают разных типов (доклад, интерактив, код и т.п.).
+ *
+ * Cookie-плашка и пометка об отсутствии рекомендательных технологий
+ * показываются авторизованным пользователям.
  */
 
 session_start();
@@ -365,7 +373,10 @@ function build_project_workflow(
 
 $workflow = build_project_workflow($workflowSteps, $sideLabels, $stepStates, $currentStates, $currentPhaseNum, $currentProjectId);
 
-// Студенческие фазы
+// =============================================================================
+// Студенческие проектные фазы и типы проектов
+// =============================================================================
+
 $studentPhases = [
     ['code' => 'topic',   'num' => 1, 'name' => 'Выбор темы',             'color' => '#8b6914'],
     ['code' => 'work',    'num' => 2, 'name' => 'Работа над проектом',     'color' => '#2563eb'],
@@ -375,84 +386,150 @@ $studentPhases = [
 $studentPhaseByNum = [];
 foreach ($studentPhases as $sp) $studentPhaseByNum[(int) $sp['num']] = $sp;
 
+$projectTypes = [
+    'code'        => ['label' => 'Код-проект',   'color' => '#16a34a', 'icon' => '💻'],
+    'research'    => ['label' => 'Исследование', 'color' => '#7c3aed', 'icon' => '🔬'],
+    'interactive' => ['label' => 'Интерактив',   'color' => '#2563eb', 'icon' => '🎮'],
+    'report'      => ['label' => 'Доклад',       'color' => '#8b6914', 'icon' => '📄'],
+    'design'      => ['label' => 'Дизайн',       'color' => '#d97706', 'icon' => '🎨'],
+];
+
 $mockStudents = [
-    ['id' => 1, 'name' => 'Иванов Иван Иванович',       'group' => 'ИУ7-41Б',  'topic' => 'ML-модель для телекома'],
-    ['id' => 2, 'name' => 'Петрова Анна Сергеевна',     'group' => 'ИУ7-41Б',  'topic' => 'Аналитика оттока клиентов'],
-    ['id' => 3, 'name' => 'Сидоров Пётр Алексеевич',    'group' => 'ИУ7-42Б',  'topic' => 'Чат-бот поддержки на LLM'],
-    ['id' => 4, 'name' => 'Кузнецова Мария Дмитриевна', 'group' => 'ИУ7-42Б',  'topic' => 'Прогноз нагрузки сети'],
-    ['id' => 5, 'name' => 'Смирнов Олег Викторович',    'group' => 'ИУ7-43Б',  'topic' => 'Классификация отзывов'],
-    ['id' => 6, 'name' => 'Волкова Ольга Игоревна',     'group' => 'ИУ7-43Б',  'topic' => 'Дашборд качества связи'],
-    ['id' => 7, 'name' => 'Никитин Артём Павлович',     'group' => 'ИУ7-44Б',  'topic' => 'Классификация обращений'],
-    ['id' => 8, 'name' => 'Морозова Дарья Ивановна',    'group' => 'ИУ7-44Б',  'topic' => 'Рекомендации тарифов'],
-    ['id' => 9, 'name' => 'Федотов Кирилл Андреевич',   'group' => 'ИУ7-45Б',  'topic' => 'Сегментация абонентов'],
-    ['id' => 10,'name' => 'Романова Елизавета Олеговна','group' => 'ИУ7-45Б',  'topic' => 'Оптимизация маршрутизации'],
+    ['id' => 1, 'name' => 'Иванов Иван Иванович',       'group' => 'ИУ7-41Б'],
+    ['id' => 2, 'name' => 'Петрова Анна Сергеевна',     'group' => 'ИУ7-41Б'],
+    ['id' => 3, 'name' => 'Сидоров Пётр Алексеевич',    'group' => 'ИУ7-42Б'],
+    ['id' => 4, 'name' => 'Кузнецова Мария Дмитриевна', 'group' => 'ИУ7-42Б'],
+    ['id' => 5, 'name' => 'Смирнов Олег Викторович',    'group' => 'ИУ7-43Б'],
+    ['id' => 6, 'name' => 'Волкова Ольга Игоревна',     'group' => 'ИУ7-43Б'],
+    ['id' => 7, 'name' => 'Никитин Артём Павлович',     'group' => 'ИУ7-44Б'],
+    ['id' => 8, 'name' => 'Морозова Дарья Ивановна',    'group' => 'ИУ7-44Б'],
+    ['id' => 9, 'name' => 'Федотов Кирилл Андреевич',   'group' => 'ИУ7-45Б'],
+    ['id' => 10,'name' => 'Романова Елизавета Олеговна','group' => 'ИУ7-45Б'],
+];
+$studentById = [];
+foreach ($mockStudents as $s) $studentById[(int) $s['id']] = $s;
+
+$mockProjects = [
+    [
+        'id'       => 1,
+        'title'    => 'ML-модель для телекома',
+        'type'     => 'code',
+        'students' => [1, 2, 4],
+        'history'  => [
+            ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы и постановка задачи'],
+            ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы, сбор данных'],
+            ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита: замечания по методологии'],
+            ['num' => 2, 'date' => '30.09', 'note' => 'Возврат: доработка методологии'],
+            ['num' => 3, 'date' => '07.10', 'note' => 'Повторная предзащита — принято'],
+        ],
+        'git' => [
+            ['hash' => 'a3f9c12', 'date' => '20.09 14:23', 'author' => 'Иванов И.И.',    'message' => 'Добавлен раздел «Введение»'],
+            ['hash' => 'b7e2a45', 'date' => '19.09 18:07', 'author' => 'Петрова А.С.',   'message' => 'Постановка задачи и цели работы'],
+            ['hash' => 'c1d4f88', 'date' => '19.09 11:52', 'author' => 'Преподаватель',  'message' => 'Ревью: рекомендации по структуре'],
+            ['hash' => 'd92b8e1', 'date' => '18.09 20:31', 'author' => 'Кузнецова М.Д.', 'message' => 'Инициализация репозитория и README'],
+        ],
+    ],
+    [
+        'id'       => 2,
+        'title'    => 'Аналитика оттока клиентов',
+        'type'     => 'research',
+        'students' => [3],
+        'history'  => [
+            ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: аналитика оттока'],
+            ['num' => 2, 'date' => '09.09', 'note' => 'Сбор и обработка данных'],
+            ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита — хорошо'],
+        ],
+        'git' => [
+            ['hash' => 'f1a2b3c', 'date' => '15.09 10:14', 'author' => 'Сидоров П.А.', 'message' => 'Обзор литературы'],
+            ['hash' => 'g4h5i6j', 'date' => '12.09 16:40', 'author' => 'Сидоров П.А.', 'message' => 'Первичный анализ датасета'],
+        ],
+    ],
+    [
+        'id'       => 3,
+        'title'    => 'Чат-бот поддержки на LLM',
+        'type'     => 'code',
+        'students' => [5, 6],
+        'history'  => [
+            ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: чат-бот на LLM'],
+            ['num' => 2, 'date' => '09.09', 'note' => 'Прототип и интеграция с API'],
+            ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита'],
+            ['num' => 4, 'date' => '30.09', 'note' => 'Защита проекта — отлично'],
+        ],
+        'git' => [
+            ['hash' => 'k1l2m3n', 'date' => '22.09 11:08', 'author' => 'Смирнов О.В.',  'message' => 'MVP чат-бота'],
+            ['hash' => 'o4p5q6r', 'date' => '21.09 17:32', 'author' => 'Волкова О.И.',  'message' => 'Интеграция с LLM API'],
+        ],
+    ],
+    [
+        'id'       => 4,
+        'title'    => 'Дашборд качества связи',
+        'type'     => 'interactive',
+        'students' => [7],
+        'history'  => [
+            ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: дашборд качества'],
+            ['num' => 2, 'date' => '09.09', 'note' => 'Прототип и визуализация'],
+            ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита — принято'],
+        ],
+        'git' => [
+            ['hash' => 's7t8u9v', 'date' => '20.09 09:15', 'author' => 'Никитин А.П.', 'message' => 'Прототип дашборда'],
+        ],
+    ],
+    [
+        'id'       => 5,
+        'title'    => 'Классификация обращений',
+        'type'     => 'code',
+        'students' => [8, 9],
+        'history'  => [
+            ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы'],
+            ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы'],
+            ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита'],
+            ['num' => 2, 'date' => '30.09', 'note' => 'Возврат: доработка признаков'],
+        ],
+        'git' => [
+            ['hash' => 'w1x2y3z', 'date' => '19.09 14:52', 'author' => 'Морозова Д.И.', 'message' => 'Базовая модель классификации'],
+        ],
+    ],
+    [
+        'id'       => 6,
+        'title'    => 'Рекомендации тарифов',
+        'type'     => 'report',
+        'students' => [10, 1],
+        'history'  => [
+            ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: рекомендации тарифов'],
+        ],
+        'git' => [],
+    ],
+    [
+        'id'       => 7,
+        'title'    => 'Юзабилити-аудит личного кабинета',
+        'type'     => 'design',
+        'students' => [3, 5],
+        'history'  => [
+            ['num' => 1, 'date' => '06.09', 'note' => 'Согласование темы'],
+            ['num' => 2, 'date' => '13.09', 'note' => 'Сбор метрик и интервью'],
+        ],
+        'git' => [],
+    ],
 ];
 
-$mockStudentHistories = [
-    1 => [
-        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: ML-модель для телекома'],
-        ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы над проектом'],
-        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита: замечания по методологии'],
-        ['num' => 2, 'date' => '30.09', 'note' => 'Возврат: доработка методологии'],
-        ['num' => 3, 'date' => '07.10', 'note' => 'Повторная предзащита — принято'],
-    ],
-    2 => [
-        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Аналитика оттока'],
-        ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы'],
-        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита — хорошо'],
-    ],
-    3 => [
-        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Чат-бот на LLM'],
-        ['num' => 2, 'date' => '09.09', 'note' => 'Работа над проектом'],
-        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита'],
-        ['num' => 4, 'date' => '30.09', 'note' => 'Защита проекта — отлично'],
-    ],
-    4 => [
-        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Прогноз нагрузки'],
-        ['num' => 2, 'date' => '09.09', 'note' => 'Сбор данных'],
-        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита: замечания'],
-        ['num' => 2, 'date' => '28.09', 'note' => 'Возврат: доработка модели'],
-        ['num' => 3, 'date' => '05.10', 'note' => 'Предзащита повторно'],
-        ['num' => 4, 'date' => '12.10', 'note' => 'Защита проекта'],
-    ],
-    5 => [['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы']],
-    6 => [
-        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Дашборд качества'],
-        ['num' => 2, 'date' => '09.09', 'note' => 'Прототип дашборда'],
-        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита — принято'],
-        ['num' => 4, 'date' => '07.10', 'note' => 'Защита'],
-    ],
-    7 => [
-        ['num' => 1, 'date' => '02.09', 'note' => 'Выбор темы: Классификация'],
-        ['num' => 2, 'date' => '09.09', 'note' => 'Начало работы'],
-        ['num' => 3, 'date' => '23.09', 'note' => 'Предзащита'],
-        ['num' => 2, 'date' => '30.09', 'note' => 'Возврат: доработка признаков'],
-        ['num' => 3, 'date' => '07.10', 'note' => 'Повторная предзащита'],
-        ['num' => 4, 'date' => '14.10', 'note' => 'Защита — хорошо'],
-    ],
-    8 => [
-        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Рекомендации тарифов'],
-        ['num' => 2, 'date' => '12.09', 'note' => 'Сбор датасета'],
-        ['num' => 3, 'date' => '26.09', 'note' => 'Предзащита — принято'],
-    ],
-    9 => [['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Сегментация']],
-    10 => [
-        ['num' => 1, 'date' => '05.09', 'note' => 'Выбор темы: Оптимизация маршрутизации'],
-        ['num' => 2, 'date' => '12.09', 'note' => 'Начало работы'],
-        ['num' => 3, 'date' => '26.09', 'note' => 'Предзащита'],
-        ['num' => 2, 'date' => '03.10', 'note' => 'Возврат: нет данных для валидации'],
-    ],
-];
+$projectById = [];
+$projectsByStudent = [];
+foreach ($mockProjects as $proj) {
+    $projectById[(int) $proj['id']] = $proj;
+    foreach ($proj['students'] as $sid) {
+        $projectsByStudent[(int) $sid][] = (int) $proj['id'];
+    }
+}
 
-$mockGitHistory = [
-    ['hash' => 'a3f9c12', 'date' => '20.09 14:23', 'author' => 'Иванов И.И.',      'message' => 'Добавлен раздел «Введение»'],
-    ['hash' => 'b7e2a45', 'date' => '19.09 18:07', 'author' => 'Иванов И.И.',      'message' => 'Постановка задачи и цели работы'],
-    ['hash' => 'c1d4f88', 'date' => '19.09 11:52', 'author' => 'Преподаватель',    'message' => 'Ревью: рекомендации по структуре'],
-    ['hash' => 'd92b8e1', 'date' => '18.09 20:31', 'author' => 'Иванов И.И.',      'message' => 'Инициализация репозитория и README'],
-    ['hash' => 'e45a3c7', 'date' => '18.09 12:00', 'author' => 'ИТ Школа РТК',     'message' => 'Создание шаблона курсового проекта'],
-];
+function project_current_phase(array $proj): int {
+    if (empty($proj['history'])) return 0;
+    $last = end($proj['history']);
+    return (int) $last['num'];
+}
 
-// ===== Журнал =====
+// =============================================================================
+// Журнал
+// =============================================================================
 $journalDates = ['03.09', '05.09', '10.09', '12.09', '17.09', '19.09', '24.09', '26.09', '01.10', '03.10'];
 
 $journalLessons = [
@@ -491,12 +568,12 @@ $journalNotes = [
 
 // ===== Сводные метрики по журналу (для менеджера) =====
 $journalSummary = [
-    'dist'        => [5 => 0, 4 => 0, 3 => 0, 2 => 0],
-    'absent'      => 0,
-    'present'     => 0,
-    'cells'       => 0,
-    'gradeSum'    => 0,
-    'gradeCount'  => 0,
+    'dist'       => [5 => 0, 4 => 0, 3 => 0, 2 => 0],
+    'absent'     => 0,
+    'present'    => 0,
+    'cells'      => 0,
+    'gradeSum'   => 0,
+    'gradeCount' => 0,
 ];
 $perStudentSummary = [];
 foreach ($mockStudents as $st) {
@@ -519,14 +596,14 @@ foreach ($mockStudents as $st) {
         }
     }
     $perStudentSummary[$sid] = [
-        'student'   => $st,
-        'sum'       => $sSum,
-        'count'     => $sCount,
-        'avg'       => $sCount > 0 ? round($sSum / $sCount, 2) : null,
-        'absent'    => $sAbsent,
-        'present'   => $sPresent,
-        'dist'      => $sDist,
-        'attendance'=> ($sAbsent + $sPresent) > 0 ? round($sPresent / ($sAbsent + $sPresent) * 100, 1) : null,
+        'student'    => $st,
+        'sum'        => $sSum,
+        'count'      => $sCount,
+        'avg'        => $sCount > 0 ? round($sSum / $sCount, 2) : null,
+        'absent'     => $sAbsent,
+        'present'    => $sPresent,
+        'dist'       => $sDist,
+        'attendance' => ($sAbsent + $sPresent) > 0 ? round($sPresent / ($sAbsent + $sPresent) * 100, 1) : null,
     ];
 }
 foreach ($journalSummary['dist'] as $g => $c) {
@@ -558,10 +635,7 @@ $parentVisitsMock = [
 
 $viewParentChildId = (int) ($_GET['child_id'] ?? 0);
 if ($viewParentChildId === 0 && $mockStudents !== []) $viewParentChildId = (int) $mockStudents[0]['id'];
-$parentChild = null;
-foreach ($mockStudents as $s) {
-    if ((int) $s['id'] === $viewParentChildId) { $parentChild = $s; break; }
-}
+$parentChild = $studentById[$viewParentChildId] ?? null;
 
 if (!isset($_SESSION['parent_visits'])) $_SESSION['parent_visits'] = [];
 $todayKey = date('Y-m-d');
@@ -727,10 +801,7 @@ $managerLabel = $currentUser !== null ? ($currentUser['full_name'] ?: $currentUs
 
 $viewStudentId = (int) ($_GET['student_id'] ?? 0);
 if ($viewRole === 'student' && $viewStudentId === 0 && $mockStudents !== []) $viewStudentId = (int) $mockStudents[0]['id'];
-$selectedStudent = null;
-foreach ($mockStudents as $s) {
-    if ((int) $s['id'] === $viewStudentId) { $selectedStudent = $s; break; }
-}
+$selectedStudent = $studentById[$viewStudentId] ?? null;
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -833,11 +904,7 @@ foreach ($mockStudents as $s) {
         .role-switch__emoji { font-size: 1rem; line-height: 1; flex-shrink: 0; filter: saturate(0.9); }
         .role-switch__label { white-space: nowrap; }
 
-        .topbar__logout {
-            padding: 0.5rem var(--space-md);
-            border: 1px solid rgba(26, 26, 26, 0.2);
-            font-size: 0.85rem; transition: var(--transition-base);
-        }
+        .topbar__logout { padding: 0.5rem var(--space-md); border: 1px solid rgba(26, 26, 26, 0.2); font-size: 0.85rem; transition: var(--transition-base); }
         .topbar__logout:hover { border-color: var(--color-accent); background-color: rgba(139, 105, 20, 0.05); }
 
         .mainnav { display: flex; align-items: center; gap: var(--space-xs); padding: 0 var(--space-lg); background-color: var(--color-light); border-bottom: 1px solid rgba(26, 26, 26, 0.1); }
@@ -859,11 +926,7 @@ foreach ($mockStudents as $s) {
         .notification__icon { font-size: 1.2rem; flex-shrink: 0; }
         .notification__body { flex: 1; }
         .notification__actions { display: flex; gap: 8px; flex-shrink: 0; }
-        .notification__btn {
-            padding: 6px 14px; font-size: 0.8rem; font-weight: 500;
-            border: 1px solid currentColor; background: transparent;
-            cursor: pointer; font-family: var(--font-sans); transition: var(--transition-base);
-        }
+        .notification__btn { padding: 6px 14px; font-size: 0.8rem; font-weight: 500; border: 1px solid currentColor; background: transparent; cursor: pointer; font-family: var(--font-sans); transition: var(--transition-base); }
         .notification__btn--primary { background-color: #d97706; color: #fff; border-color: #d97706; }
         .notification__btn--primary:hover { background-color: #b45309; border-color: #b45309; }
         .notification__btn--danger { color: #dc2626; }
@@ -887,11 +950,7 @@ foreach ($mockStudents as $s) {
         .panel__title { font-size: 1.4rem; }
         .panel__subtitle { color: var(--color-tertiary); font-size: 0.85rem; }
 
-        .panel__hint {
-            display: inline-block; margin-top: 6px; font-size: 0.78rem;
-            color: var(--color-accent-dark); background-color: rgba(139, 105, 20, 0.08);
-            border: 1px dashed var(--color-accent); padding: 3px 8px;
-        }
+        .panel__hint { display: inline-block; margin-top: 6px; font-size: 0.78rem; color: var(--color-accent-dark); background-color: rgba(139, 105, 20, 0.08); border: 1px dashed var(--color-accent); padding: 3px 8px; }
         .panel__hint--phase { background-color: rgba(37, 99, 235, 0.08); border-color: #2563eb; color: #1d4ed8; }
 
         .project-select { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
@@ -1059,14 +1118,27 @@ foreach ($mockStudents as $s) {
         .tab-content { display: none; flex: 1; min-height: 0; flex-direction: column; }
         .tab-content.is-active { display: flex; }
 
+        .project-type-chip {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 12px;
+            font-size: 0.72rem; font-weight: 600;
+            color: #fff;
+            background: var(--type-color, #8b6914);
+            background-image: linear-gradient(180deg, rgba(255,255,255,0.25) 0%, rgba(0,0,0,0.08) 100%);
+            white-space: nowrap;
+        }
+
+        .participant-list { display: flex; flex-direction: column; gap: 4px; }
+        .participant-row { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; }
+        .participant-row__name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
         .phase-timeline-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid rgba(26, 26, 26, 0.1); background: var(--color-white); }
         table.students-timeline { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; }
         table.students-timeline th, table.students-timeline td { border-bottom: 1px solid rgba(26, 26, 26, 0.1); padding: 10px 12px; vertical-align: middle; }
         table.students-timeline thead th { background-color: var(--color-primary); color: #fff; font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; position: sticky; top: 0; z-index: 2; }
-        table.students-timeline thead th:first-child { width: 240px; }
         table.students-timeline tbody tr:hover { background-color: rgba(139, 105, 20, 0.04); }
-        table.students-timeline td.student-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        table.students-timeline td.student-name .student-sub { display: block; font-weight: 400; font-size: 0.7rem; color: var(--color-tertiary); }
+        table.students-timeline td.project-cell-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        table.students-timeline td.project-cell-title .student-sub { display: block; font-weight: 400; font-size: 0.7rem; color: var(--color-tertiary); margin-top: 4px; }
 
         .phase-timeline { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow-x: auto; padding: 4px 0; }
         .phase-chip {
@@ -1082,6 +1154,90 @@ foreach ($mockStudents as $s) {
         .phase-arrow { color: var(--color-tertiary); font-size: 0.85rem; flex-shrink: 0; line-height: 1; padding: 0 1px; }
         .phase-arrow--return { color: #b45309; font-weight: 700; }
         .phase-timeline-empty { font-size: 0.78rem; color: var(--color-tertiary); font-style: italic; }
+
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+            gap: var(--space-md);
+        }
+
+        .project-card {
+            background: var(--color-white);
+            border: 1px solid rgba(26, 26, 26, 0.1);
+            border-left: 4px solid var(--type-color, var(--color-accent));
+            padding: var(--space-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+            transition: box-shadow 0.15s, transform 0.15s;
+        }
+        .project-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+
+        .project-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-sm); flex-wrap: wrap; }
+        .project-card__title {
+            font-family: var(--font-serif);
+            font-size: 1.2rem;
+            font-weight: 500;
+            line-height: 1.2;
+            color: var(--color-primary);
+        }
+        .project-card__participants {
+            font-size: 0.78rem;
+            color: var(--color-tertiary);
+            margin-top: 6px;
+        }
+        .project-card__participants strong { color: var(--color-secondary); font-weight: 500; }
+
+        .project-card__stepper {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+        }
+        .step-mini {
+            position: relative;
+            padding: 8px 8px 8px 32px;
+            background: var(--color-light);
+            border: 1px solid rgba(26, 26, 26, 0.08);
+            border-left: 3px solid rgba(26, 26, 26, 0.2);
+            font-size: 0.72rem;
+            line-height: 1.2;
+        }
+        .step-mini__num {
+            position: absolute;
+            left: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 20px; height: 20px; border-radius: 50%;
+            background: rgba(26, 26, 26, 0.06);
+            color: var(--color-tertiary);
+            display: inline-flex; align-items: center; justify-content: center;
+            font-family: var(--font-serif);
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+        .step-mini__name { display: block; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+        .step-mini--done { border-left-color: #16a34a; background: rgba(22, 163, 74, 0.05); }
+        .step-mini--done .step-mini__num { background: rgba(22, 163, 74, 0.15); color: #15803d; }
+        .step-mini--current { border-left-color: #2563eb; background: rgba(37, 99, 235, 0.05); box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.15); }
+        .step-mini--current .step-mini__num { background: #2563eb; color: #fff; }
+        .step-mini--pending { opacity: 0.7; }
+
+        .project-card__section-label {
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-tertiary);
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .project-card .git-history { margin-top: var(--space-xs); }
+        .project-card__git-empty {
+            font-size: 0.78rem;
+            color: var(--color-tertiary);
+            font-style: italic;
+        }
 
         .journal-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid rgba(26, 26, 26, 0.1); background: var(--color-white); margin-bottom: var(--space-sm); }
         table.journal { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; table-layout: fixed; }
@@ -1179,7 +1335,6 @@ foreach ($mockStudents as $s) {
         .git-history__msg { color: #e5e5e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .git-history__meta { color: rgba(255, 255, 255, 0.45); font-size: 0.68rem; }
 
-        .student-card { display: flex; flex-direction: column; gap: var(--space-md); }
         .student-header { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md); background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%); border: 1px solid rgba(139, 105, 20, 0.2); border-left: 4px solid var(--color-accent); }
         .student-header__avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--color-accent); color: #fff; display: flex; align-items: center; justify-content: center; font-family: var(--font-serif); font-size: 1.5rem; font-weight: 600; flex-shrink: 0; }
         .student-header__info { flex: 1; }
@@ -1202,7 +1357,6 @@ foreach ($mockStudents as $s) {
         .student-phase-step--pending { opacity: 0.7; }
         .student-phase-step--pending .student-phase-step__status { border-color: rgba(26, 26, 26, 0.2); color: var(--color-tertiary); }
 
-        /* ===== Сводные метрики журнала ===== */
         .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-sm); margin-bottom: var(--space-md); }
         .summary-card { position: relative; padding: 16px 18px; background: linear-gradient(135deg, #fafaf7 0%, #f0ece0 100%); border: 1px solid rgba(139, 105, 20, 0.15); border-left: 3px solid var(--color-accent); overflow: hidden; }
         .summary-card--green { border-left-color: #16a34a; }
@@ -1323,6 +1477,120 @@ foreach ($mockStudents as $s) {
         .journal-parent-badge { display: inline-flex; align-items: center; justify-content: center; width: 8px; height: 8px; border-radius: 50%; background: #16a34a; margin-left: 6px; vertical-align: middle; box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15); }
         .journal-parent-badge--low  { background: #d97706; box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15); }
         .journal-parent-badge--cold { background: #dc2626; box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15); }
+
+        /* ===== Cookie-плашка ===== */
+        .cookie-banner {
+            position: fixed;
+            left: 16px;
+            right: 16px;
+            bottom: 16px;
+            z-index: 9999;
+            background: var(--color-white);
+            border: 1px solid rgba(26, 26, 26, 0.15);
+            border-left: 4px solid var(--color-accent);
+            box-shadow:
+                0 8px 24px rgba(0, 0, 0, 0.12),
+                0 20px 48px rgba(0, 0, 0, 0.08);
+            padding: 14px 18px;
+            display: none;
+            gap: var(--space-md);
+            align-items: flex-start;
+            font-family: var(--font-sans);
+            font-size: 0.85rem;
+            color: var(--color-primary);
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+            transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+        }
+
+        .cookie-banner.is-visible { display: flex; }
+
+        .cookie-banner__icon { font-size: 1.4rem; flex-shrink: 0; line-height: 1; }
+
+        .cookie-banner__body { flex: 1; min-width: 0; }
+
+        .cookie-banner__title {
+            font-family: var(--font-serif);
+            font-size: 1.05rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+            line-height: 1.2;
+        }
+
+        .cookie-banner__text {
+            color: var(--color-secondary);
+            line-height: 1.5;
+            font-size: 0.82rem;
+        }
+
+        .cookie-banner__text strong {
+            color: var(--color-accent-dark);
+            font-weight: 600;
+        }
+
+        .cookie-banner__actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+            align-self: center;
+        }
+
+        .cookie-banner__btn {
+            padding: 8px 18px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            font-family: var(--font-sans);
+            border: 1px solid var(--color-accent);
+            background: var(--color-accent);
+            color: var(--color-white);
+            cursor: pointer;
+            transition: var(--transition-base);
+            white-space: nowrap;
+        }
+        .cookie-banner__btn:hover {
+            background: var(--color-accent-light);
+            border-color: var(--color-accent-light);
+        }
+
+        .cookie-banner__btn--ghost {
+            background: transparent;
+            color: var(--color-secondary);
+            border-color: rgba(26, 26, 26, 0.2);
+        }
+        .cookie-banner__btn--ghost:hover {
+            background: rgba(0, 0, 0, 0.04);
+            color: var(--color-primary);
+            border-color: rgba(26, 26, 26, 0.35);
+        }
+
+        .no-reco-note {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 16px;
+            font-size: 0.72rem;
+            color: var(--color-tertiary);
+            border-top: 1px solid rgba(26, 26, 26, 0.06);
+            background: var(--color-light);
+        }
+        .no-reco-note__icon {
+            font-size: 0.85rem;
+            color: var(--color-accent-dark);
+        }
+
+        @media (max-width: 720px) {
+            .cookie-banner {
+                flex-direction: column;
+                align-items: stretch;
+                padding: 12px 14px;
+            }
+            .cookie-banner__actions {
+                align-self: stretch;
+                justify-content: flex-end;
+            }
+        }
 
         @media (max-width: 1100px) { .dash-grid { grid-template-columns: 1fr 1fr; } .dash-card--wide { grid-column: span 2; } .dash-card--map { grid-column: span 2; } }
         @media (max-width: 720px) { .dash-grid { grid-template-columns: 1fr; } .dash-card--wide, .dash-card--map { grid-column: span 1; } }
@@ -1461,112 +1729,122 @@ foreach ($mockStudents as $s) {
                                         Проектная работа и сводка по классно-урочной системе
                                         · курс «<?= e($currentProject['title']) ?>»
                                         · студентов: <?= count($mockStudents) ?>
+                                        · проектов: <?= count($mockProjects) ?>
                                     </p>
                                 </div>
                             </div>
 
                             <div class="tabs" role="tablist">
-                                <button class="tab is-active" data-tab="mgr-project" role="tab" aria-selected="true">📋 Проект</button>
+                                <button class="tab is-active" data-tab="mgr-project" role="tab" aria-selected="true">📋 Проекты</button>
                                 <button class="tab" data-tab="mgr-journal-summary" role="tab" aria-selected="false">📊 Сводка по журналу</button>
                             </div>
 
-                            <!-- Вкладка «Проект» -->
                             <div class="tab-content is-active" data-tab-content="mgr-project" role="tabpanel">
-                                <div class="students-layout">
-                                    <div class="students-block">
-                                        <div style="overflow:auto; border:1px solid rgba(26,26,26,0.1);">
-                                            <table class="students-timeline">
-                                                <thead><tr><th>Студент</th><th>История проектных фаз</th></tr></thead>
-                                                <tbody>
-                                                    <?php foreach ($mockStudents as $st): ?>
-                                                        <?php
-                                                        $history = $mockStudentHistories[(int) $st['id']] ?? [];
-                                                        $pv = $parentVisitsMock[(int) $st['id']] ?? null;
-                                                        $chipCls = '';
-                                                        if ($pv !== null) {
-                                                            if ($pv['count'] >= 10) $chipCls = 'parent-visits-chip--active';
-                                                            elseif ($pv['count'] >= 5) $chipCls = 'parent-visits-chip--low';
-                                                            else $chipCls = 'parent-visits-chip--cold';
-                                                        }
-                                                        ?>
-                                                        <tr>
-                                                            <td class="student-name" title="<?= e($st['name']) ?>">
-                                                                <span style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                                                    <span><?= e($st['name']) ?><span class="student-sub"><?= e($st['group']) ?></span></span>
+                                <p class="panel__subtitle" style="margin-bottom: var(--space-sm);">
+                                    Строки — студенческие проекты. У одного студента может быть несколько проектов,
+                                    несколько студентов могут работать над одним проектом.
+                                </p>
+
+                                <div class="phase-timeline-wrap">
+                                    <table class="students-timeline">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 250px;">Проект</th>
+                                                <th style="width: 130px;">Тип</th>
+                                                <th style="width: 240px;">Участники</th>
+                                                <th>История проектных фаз</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($mockProjects as $proj): ?>
+                                                <?php
+                                                $curPhase = project_current_phase($proj);
+                                                $curPhaseName = $studentPhaseByNum[$curPhase]['name'] ?? '—';
+                                                $type = $projectTypes[$proj['type']] ?? ['label' => $proj['type'], 'color' => '#8b6914', 'icon' => '📌'];
+                                                ?>
+                                                <tr>
+                                                    <td class="project-cell-title" title="<?= e($proj['title']) ?>">
+                                                        <?= e($proj['title']) ?>
+                                                        <span class="student-sub">
+                                                            Текущая фаза: <?= e($curPhaseName) ?> (<?= (int) $curPhase ?>/4)
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <span class="project-type-chip" style="--type-color: <?= e($type['color']) ?>;">
+                                                            <?= $type['icon'] ?> <?= e($type['label']) ?>
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <div class="participant-list">
+                                                            <?php foreach ($proj['students'] as $sid): ?>
+                                                                <?php
+                                                                $st = $studentById[(int) $sid] ?? null;
+                                                                if (!$st) continue;
+                                                                $pv = $parentVisitsMock[(int) $sid] ?? null;
+                                                                $chipCls = '';
+                                                                if ($pv !== null) {
+                                                                    if ($pv['count'] >= 10) $chipCls = 'parent-visits-chip--active';
+                                                                    elseif ($pv['count'] >= 5) $chipCls = 'parent-visits-chip--low';
+                                                                    else $chipCls = 'parent-visits-chip--cold';
+                                                                }
+                                                                ?>
+                                                                <span class="participant-row" title="<?= e($st['name']) ?> · <?= e($st['group']) ?>">
+                                                                    <span class="participant-row__name"><?= e($st['name']) ?></span>
                                                                     <?php if ($pv !== null): ?>
-                                                                        <span class="parent-visits-chip <?= $chipCls ?>" title="Активность родителя в CRM: <?= (int) $pv['count'] ?> визитов, последний <?= e($pv['last']) ?>">
+                                                                        <span class="parent-visits-chip <?= $chipCls ?>" title="Активность родителя: <?= (int) $pv['count'] ?> визитов, последний <?= e($pv['last']) ?>">
                                                                             👪 <?= (int) $pv['count'] ?>
-                                                                            <span class="parent-visits-chip--trend-<?= $pv['trend'][0] === '+' ? 'up' : ($pv['trend'][0] === '-' ? 'down' : 'up') ?>" style="font-size:0.65rem;"><?= e($pv['trend']) ?></span>
                                                                         </span>
                                                                     <?php endif; ?>
                                                                 </span>
-                                                            </td>
-                                                            <td>
-                                                                <?php if (empty($history)): ?>
-                                                                    <span class="phase-timeline-empty">Нет записей</span>
-                                                                <?php else: ?>
-                                                                    <div class="phase-timeline">
-                                                                        <?php $prevNum = 0; ?>
-                                                                        <?php foreach ($history as $idx => $h): ?>
-                                                                            <?php
-                                                                            $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
-                                                                            if (!$sp) continue;
-                                                                            $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
-                                                                            ?>
-                                                                            <?php if ($idx > 0): ?>
-                                                                                <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>" title="<?= $isReturn ? 'Возврат' : 'Переход' ?>"><?= $isReturn ? '↩' : '→' ?></span>
-                                                                            <?php endif; ?>
-                                                                            <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
-                                                                                <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
-                                                                            </span>
-                                                                            <?php $prevNum = (int) $h['num']; ?>
-                                                                        <?php endforeach; ?>
-                                                                    </div>
-                                                                <?php endif; ?>
-                                                            </td>
-                                                        </tr>
-                                                    <?php endforeach; ?>
-                                                </tbody>
-                                            </table>
-                                        </div>
-
-                                        <section class="legend" style="margin-top: var(--space-sm);">
-                                            <h3 class="legend__title">Легенда</h3>
-                                            <div class="legend__items">
-                                                <?php foreach ($studentPhases as $sp): ?>
-                                                    <span class="legend__item">
-                                                        <span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span>
-                                                        <?= (int) $sp['num'] ?>. <?= e($sp['name']) ?>
-                                                    </span>
-                                                <?php endforeach; ?>
-                                                <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>Возврат</span>
-                                                <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>Переход</span>
-                                                <span class="legend__item"><span class="parent-visits-chip parent-visits-chip--active" style="margin:0;">👪 N</span>Активность родителя (N визитов)</span>
-                                            </div>
-                                        </section>
-                                    </div>
-
-                                    <div class="students-block">
-                                        <div class="git-history">
-                                            <div class="git-history__header">Git-история проекта <span class="git-history__branch">⎇ main</span></div>
-                                            <div class="git-history__list">
-                                                <?php foreach ($mockGitHistory as $commit): ?>
-                                                    <div class="git-history__item">
-                                                        <div class="git-history__graph"><span class="git-history__dot"></span></div>
-                                                        <span class="git-history__hash"><?= e($commit['hash']) ?></span>
-                                                        <div class="git-history__content">
-                                                            <span class="git-history__msg"><?= e($commit['message']) ?></span>
-                                                            <span class="git-history__meta"><?= e($commit['author']) ?> · <?= e($commit['date']) ?></span>
+                                                            <?php endforeach; ?>
                                                         </div>
-                                                    </div>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        </div>
-                                    </div>
+                                                    </td>
+                                                    <td>
+                                                        <?php if (empty($proj['history'])): ?>
+                                                            <span class="phase-timeline-empty">Нет записей</span>
+                                                        <?php else: ?>
+                                                            <div class="phase-timeline">
+                                                                <?php $prevNum = 0; ?>
+                                                                <?php foreach ($proj['history'] as $idx => $h): ?>
+                                                                    <?php
+                                                                    $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
+                                                                    if (!$sp) continue;
+                                                                    $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
+                                                                    ?>
+                                                                    <?php if ($idx > 0): ?>
+                                                                        <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>" title="<?= $isReturn ? 'Возврат' : 'Переход' ?>"><?= $isReturn ? '↩' : '→' ?></span>
+                                                                    <?php endif; ?>
+                                                                    <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
+                                                                        <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                                    </span>
+                                                                    <?php $prevNum = (int) $h['num']; ?>
+                                                                <?php endforeach; ?>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
                                 </div>
+
+                                <section class="legend" style="margin-top: var(--space-sm);">
+                                    <h3 class="legend__title">Легенда</h3>
+                                    <div class="legend__items">
+                                        <?php foreach ($projectTypes as $t): ?>
+                                            <span class="legend__item">
+                                                <span class="project-type-chip" style="--type-color: <?= e($t['color']) ?>; margin:0;">
+                                                    <?= $t['icon'] ?> <?= e($t['label']) ?>
+                                                </span>
+                                            </span>
+                                        <?php endforeach; ?>
+                                        <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>Возврат</span>
+                                        <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>Переход</span>
+                                        <span class="legend__item"><span class="parent-visits-chip parent-visits-chip--active" style="margin:0;">👪 N</span>Активность родителя</span>
+                                    </div>
+                                </section>
                             </div>
 
-                            <!-- Вкладка «Сводка по журналу» -->
                             <div class="tab-content" data-tab-content="mgr-journal-summary" role="tabpanel">
                                 <p class="panel__subtitle" style="margin-bottom: var(--space-md);">
                                     Агрегированные показатели классно-урочной работы по курсу.
@@ -1608,9 +1886,7 @@ foreach ($mockStudents as $s) {
                                             <div class="grade-dist__mark grade-dist__mark--<?= $g ?>"><?= $g ?></div>
                                             <div class="grade-dist__count">
                                                 <?= $c ?> шт.
-                                                <?php if ($distTotal > 0): ?>
-                                                    · <?= round($c / $distTotal * 100, 0) ?>%
-                                                <?php endif; ?>
+                                                <?php if ($distTotal > 0): ?> · <?= round($c / $distTotal * 100, 0) ?>%<?php endif; ?>
                                             </div>
                                             <div class="grade-dist__bar">
                                                 <div class="grade-dist__bar-fill grade-dist__bar-fill--<?= $g ?>"
@@ -1662,9 +1938,7 @@ foreach ($mockStudents as $s) {
                                                         <?php if ($att !== null): ?>
                                                             <span class="summary-bar"><span class="summary-bar__fill" style="width:<?= (int) $att ?>%"></span></span>
                                                             <?= e((string) $att) ?>%
-                                                        <?php else: ?>
-                                                            —
-                                                        <?php endif; ?>
+                                                        <?php else: ?>—<?php endif; ?>
                                                     </td>
                                                     <td class="num" style="color: <?= (int) $row['absent'] > 0 ? '#dc2626' : 'var(--color-tertiary)' ?>; font-weight: 600;">
                                                         <?= (int) $row['absent'] ?>
@@ -1838,40 +2112,72 @@ foreach ($mockStudents as $s) {
 
                     <section class="panel panel--tabs">
                         <div class="tabs" role="tablist">
-                            <button class="tab is-active" data-tab="project" role="tab" aria-selected="true">📋 Проект</button>
+                            <button class="tab is-active" data-tab="project" role="tab" aria-selected="true">📋 Проекты</button>
                             <button class="tab" data-tab="journal" role="tab" aria-selected="false">📓 Журнал</button>
                         </div>
 
                         <div class="tab-content is-active" data-tab-content="project" role="tabpanel">
-                            <div style="display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap: var(--space-sm); margin-bottom: var(--space-sm);">
-                                <div>
-                                    <h2 class="panel__title" style="font-size:1.2rem;">История проектных фаз студентов</h2>
-                                    <p class="panel__subtitle">Возможны возвраты к предыдущим фазам (↩) — например, доработка после замечаний.</p>
-                                </div>
-                            </div>
+                            <p class="panel__subtitle" style="margin-bottom: var(--space-sm);">
+                                Проекты студентов и их фазовые истории. Возможны возвраты к предыдущим фазам (↩).
+                            </p>
 
                             <div class="phase-timeline-wrap">
                                 <table class="students-timeline">
-                                    <thead><tr><th>Студент</th><th>Хронология фаз</th></tr></thead>
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 250px;">Проект</th>
+                                            <th style="width: 130px;">Тип</th>
+                                            <th style="width: 240px;">Участники</th>
+                                            <th>История фаз</th>
+                                        </tr>
+                                    </thead>
                                     <tbody>
-                                        <?php foreach ($mockStudents as $st): ?>
-                                            <?php $history = $mockStudentHistories[(int) $st['id']] ?? []; ?>
+                                        <?php foreach ($mockProjects as $proj): ?>
+                                            <?php
+                                            $curPhase = project_current_phase($proj);
+                                            $curPhaseName = $studentPhaseByNum[$curPhase]['name'] ?? '—';
+                                            $type = $projectTypes[$proj['type']] ?? ['label' => $proj['type'], 'color' => '#8b6914', 'icon' => '📌'];
+                                            ?>
                                             <tr>
-                                                <td class="student-name" title="<?= e($st['name']) ?>"><?= e($st['name']) ?><span class="student-sub"><?= e($st['group']) ?><?= $st['topic'] !== '' ? ' · ' . e($st['topic']) : '' ?></span></td>
+                                                <td class="project-cell-title" title="<?= e($proj['title']) ?>">
+                                                    <?= e($proj['title']) ?>
+                                                    <span class="student-sub">
+                                                        Текущая фаза: <?= e($curPhaseName) ?> (<?= (int) $curPhase ?>/4)
+                                                    </span>
+                                                </td>
                                                 <td>
-                                                    <?php if (empty($history)): ?>
+                                                    <span class="project-type-chip" style="--type-color: <?= e($type['color']) ?>;">
+                                                        <?= $type['icon'] ?> <?= e($type['label']) ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <div class="participant-list">
+                                                        <?php foreach ($proj['students'] as $sid): ?>
+                                                            <?php
+                                                            $st = $studentById[(int) $sid] ?? null;
+                                                            if (!$st) continue;
+                                                            ?>
+                                                            <span class="participant-row">
+                                                                <span class="participant-row__name"><?= e($st['name']) ?></span>
+                                                                <span style="color:var(--color-tertiary);font-size:0.7rem;"><?= e($st['group']) ?></span>
+                                                            </span>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <?php if (empty($proj['history'])): ?>
                                                         <span class="phase-timeline-empty">Нет записей</span>
                                                     <?php else: ?>
                                                         <div class="phase-timeline">
                                                             <?php $prevNum = 0; ?>
-                                                            <?php foreach ($history as $idx => $h): ?>
+                                                            <?php foreach ($proj['history'] as $idx => $h): ?>
                                                                 <?php
                                                                 $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
                                                                 if (!$sp) continue;
                                                                 $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
                                                                 ?>
                                                                 <?php if ($idx > 0): ?>
-                                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>" title="<?= $isReturn ? 'Возврат' : 'Переход' ?>"><?= $isReturn ? '↩' : '→' ?></span>
+                                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"><?= $isReturn ? '↩' : '→' ?></span>
                                                                 <?php endif; ?>
                                                                 <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($sp['name']) ?> · <?= e($h['date']) ?> · <?= e($h['note']) ?>">
                                                                     <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
@@ -1888,10 +2194,14 @@ foreach ($mockStudents as $s) {
                             </div>
 
                             <section class="legend" style="margin-top: var(--space-sm);">
-                                <h3 class="legend__title">Легенда проектных фаз</h3>
+                                <h3 class="legend__title">Легенда</h3>
                                 <div class="legend__items">
-                                    <?php foreach ($studentPhases as $sp): ?>
-                                        <span class="legend__item"><span class="legend__swatch" style="background-color: <?= e($sp['color']) ?>"></span><?= (int) $sp['num'] ?>. <?= e($sp['name']) ?></span>
+                                    <?php foreach ($projectTypes as $t): ?>
+                                        <span class="legend__item">
+                                            <span class="project-type-chip" style="--type-color: <?= e($t['color']) ?>; margin:0;">
+                                                <?= $t['icon'] ?> <?= e($t['label']) ?>
+                                            </span>
+                                        </span>
                                     <?php endforeach; ?>
                                     <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:#b45309;font-weight:700;font-size:1.1rem;">↩</span>Возврат</span>
                                     <span class="legend__item"><span class="legend__swatch" style="background:transparent;border:none;color:var(--color-tertiary);font-weight:700;font-size:1.1rem;">→</span>Переход</span>
@@ -1999,94 +2309,123 @@ foreach ($mockStudents as $s) {
                         <?php else: ?>
                             <?php
                             $sid = (int) $selectedStudent['id'];
-                            $studentHistory = $mockStudentHistories[$sid] ?? [];
-                            $lastEntry = !empty($studentHistory) ? end($studentHistory) : null;
-                            $curStudentPhase = $lastEntry ? (int) $lastEntry['num'] : 0;
                             $studentMarks = $journalMarks[$sid] ?? [];
                             $studentNotes = $journalNotes[$sid] ?? [];
+                            $myProjectIds = $projectsByStudent[$sid] ?? [];
                             ?>
 
                             <div class="student-header" style="margin-bottom: var(--space-md);">
                                 <div class="student-header__avatar"><?= e(mb_substr($selectedStudent['name'], 0, 1, 'UTF-8')) ?></div>
                                 <div class="student-header__info">
                                     <div class="student-header__name"><?= e($selectedStudent['name']) ?></div>
-                                    <div class="student-header__meta">Группа <?= e($selectedStudent['group']) ?> · курс «<?= e($currentProject['title']) ?>»</div>
-                                    <?php if ($selectedStudent['topic'] !== ''): ?>
-                                        <div class="student-header__topic">Тема проекта: <?= e($selectedStudent['topic']) ?></div>
-                                    <?php else: ?>
-                                        <div class="student-header__topic" style="color:var(--color-tertiary);font-weight:400;">Тема проекта ещё не выбрана</div>
-                                    <?php endif; ?>
+                                    <div class="student-header__meta">Группа <?= e($selectedStudent['group']) ?> · курс «<?= e($currentProject['title']) ?>» · проектов: <?= count($myProjectIds) ?></div>
                                 </div>
                             </div>
 
-                            <!-- Табы -->
                             <div class="tabs" role="tablist">
-                                <button class="tab is-active" data-tab="student-project" role="tab" aria-selected="true">📋 Проект</button>
+                                <button class="tab is-active" data-tab="student-project" role="tab" aria-selected="true">📋 Мои проекты</button>
                                 <button class="tab" data-tab="student-journal" role="tab" aria-selected="false">📓 Журнал</button>
                             </div>
 
-                            <!-- Таб «Проект» -->
                             <div class="tab-content is-active" data-tab-content="student-project" role="tabpanel">
-                                <div class="student-card">
-                                    <div class="student-phases">
-                                        <?php foreach ($studentPhases as $sp): ?>
+                                <?php if ($myProjectIds === []): ?>
+                                    <div class="uni-empty">У вас пока нет проектов.</div>
+                                <?php else: ?>
+                                    <div class="projects-grid">
+                                        <?php foreach ($myProjectIds as $pid): ?>
                                             <?php
-                                            $spNum = (int) $sp['num'];
-                                            $cls = 'student-phase-step--pending';
-                                            $label = 'Ожидает';
-                                            if ($spNum < $curStudentPhase) { $cls = 'student-phase-step--done'; $label = 'Завершён'; }
-                                            elseif ($spNum === $curStudentPhase) { $cls = 'student-phase-step--current'; $label = 'В работе'; }
+                                            $proj = $projectById[$pid] ?? null;
+                                            if (!$proj) continue;
+                                            $curPhase = project_current_phase($proj);
+                                            $type = $projectTypes[$proj['type']] ?? ['label' => $proj['type'], 'color' => '#8b6914', 'icon' => '📌'];
                                             ?>
-                                            <div class="student-phase-step <?= $cls ?>">
-                                                <div class="student-phase-step__num"><?= $spNum ?></div>
-                                                <div class="student-phase-step__name"><?= e($sp['name']) ?></div>
-                                                <div class="student-phase-step__status"><?= $label ?></div>
-                                            </div>
+                                            <article class="project-card" style="--type-color: <?= e($type['color']) ?>;">
+                                                <header class="project-card__head">
+                                                    <div>
+                                                        <div class="project-card__title"><?= e($proj['title']) ?></div>
+                                                        <div class="project-card__participants">
+                                                            <strong>Участники:</strong>
+                                                            <?php
+                                                            $names = [];
+                                                            foreach ($proj['students'] as $psid) {
+                                                                $st = $studentById[(int) $psid] ?? null;
+                                                                if (!$st) continue;
+                                                                $names[] = e($st['name']);
+                                                            }
+                                                            echo implode(', ', $names);
+                                                            ?>
+                                                        </div>
+                                                    </div>
+                                                    <span class="project-type-chip" style="--type-color: <?= e($type['color']) ?>;">
+                                                        <?= $type['icon'] ?> <?= e($type['label']) ?>
+                                                    </span>
+                                                </header>
+
+                                                <div class="project-card__section-label">Текущая фаза</div>
+                                                <div class="project-card__stepper">
+                                                    <?php foreach ($studentPhases as $sp): ?>
+                                                        <?php
+                                                        $spNum = (int) $sp['num'];
+                                                        $cls = 'step-mini--pending';
+                                                        if ($spNum < $curPhase) $cls = 'step-mini--done';
+                                                        elseif ($spNum === $curPhase) $cls = 'step-mini--current';
+                                                        ?>
+                                                        <div class="step-mini <?= $cls ?>">
+                                                            <span class="step-mini__num"><?= $spNum ?></span>
+                                                            <span class="step-mini__name"><?= e($sp['name']) ?></span>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+
+                                                <?php if (!empty($proj['history'])): ?>
+                                                    <div>
+                                                        <div class="project-card__section-label">История фаз</div>
+                                                        <div class="phase-timeline">
+                                                            <?php $prevNum = 0; ?>
+                                                            <?php foreach ($proj['history'] as $idx => $h): ?>
+                                                                <?php
+                                                                $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
+                                                                if (!$sp) continue;
+                                                                $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
+                                                                ?>
+                                                                <?php if ($idx > 0): ?>
+                                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"><?= $isReturn ? '↩' : '→' ?></span>
+                                                                <?php endif; ?>
+                                                                <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($h['note']) ?>">
+                                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                                </span>
+                                                                <?php $prevNum = (int) $h['num']; ?>
+                                                            <?php endforeach; ?>
+                                                        </div>
+                                                    </div>
+                                                <?php endif; ?>
+
+                                                <?php if (!empty($proj['git'])): ?>
+                                                    <div>
+                                                        <div class="project-card__section-label">Git-история проекта</div>
+                                                        <div class="git-history">
+                                                            <div class="git-history__header">main <span class="git-history__branch">⎇</span></div>
+                                                            <div class="git-history__list">
+                                                                <?php foreach ($proj['git'] as $commit): ?>
+                                                                    <div class="git-history__item">
+                                                                        <div class="git-history__graph"><span class="git-history__dot"></span></div>
+                                                                        <span class="git-history__hash"><?= e($commit['hash']) ?></span>
+                                                                        <div class="git-history__content">
+                                                                            <span class="git-history__msg"><?= e($commit['message']) ?></span>
+                                                                            <span class="git-history__meta"><?= e($commit['author']) ?> · <?= e($commit['date']) ?></span>
+                                                                        </div>
+                                                                    </div>
+                                                                <?php endforeach; ?>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </article>
                                         <?php endforeach; ?>
                                     </div>
-
-                                    <?php if (!empty($studentHistory)): ?>
-                                        <div class="legend" style="margin:0;">
-                                            <h3 class="legend__title" style="font-size:1rem;">Моя история фаз</h3>
-                                            <div class="phase-timeline">
-                                                <?php $prevNum = 0; ?>
-                                                <?php foreach ($studentHistory as $idx => $h): ?>
-                                                    <?php
-                                                    $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
-                                                    if (!$sp) continue;
-                                                    $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
-                                                    ?>
-                                                    <?php if ($idx > 0): ?>
-                                                        <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"><?= $isReturn ? '↩' : '→' ?></span>
-                                                    <?php endif; ?>
-                                                    <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($h['note']) ?>">
-                                                        <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
-                                                    </span>
-                                                    <?php $prevNum = (int) $h['num']; ?>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        </div>
-                                    <?php endif; ?>
-
-                                    <div class="git-history">
-                                        <div class="git-history__header">Git-история проекта <span class="git-history__branch">⎇ main</span></div>
-                                        <div class="git-history__list">
-                                            <?php foreach ($mockGitHistory as $commit): ?>
-                                                <div class="git-history__item">
-                                                    <div class="git-history__graph"><span class="git-history__dot"></span></div>
-                                                    <span class="git-history__hash"><?= e($commit['hash']) ?></span>
-                                                    <div class="git-history__content">
-                                                        <span class="git-history__msg"><?= e($commit['message']) ?></span>
-                                                        <span class="git-history__meta"><?= e($commit['author']) ?> · <?= e($commit['date']) ?></span>
-                                                    </div>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
-                                </div>
+                                <?php endif; ?>
                             </div>
 
-                            <!-- Таб «Журнал» -->
                             <div class="tab-content" data-tab-content="student-journal" role="tabpanel">
                                 <p class="panel__subtitle" style="margin-bottom: var(--space-sm);">
                                     Мои оценки и заметки преподавателя. Клик по дате — тема урока и домашнее задание.
@@ -2152,9 +2491,7 @@ foreach ($mockStudents as $s) {
                         <?php
                         $cid = (int) $parentChild['id'];
                         $childMarks = $journalMarks[$cid] ?? [];
-                        $childHistory = $mockStudentHistories[$cid] ?? [];
-                        $lastEntry = !empty($childHistory) ? end($childHistory) : null;
-                        $curStudentPhase = $lastEntry ? (int) $lastEntry['num'] : 0;
+                        $childProjectIds = $projectsByStudent[$cid] ?? [];
                         $pv = $parentVisitsMock[$cid] ?? null;
                         $myVisits = $_SESSION['parent_visits'][$cid] ?? [];
                         $myTotalVisits = array_sum($myVisits);
@@ -2205,12 +2542,7 @@ foreach ($mockStudents as $s) {
                                 <div class="student-header__avatar"><?= e(mb_substr($parentChild['name'], 0, 1, 'UTF-8')) ?></div>
                                 <div class="student-header__info">
                                     <div class="student-header__name"><?= e($parentChild['name']) ?></div>
-                                    <div class="student-header__meta">Группа <?= e($parentChild['group']) ?> · курс «<?= e($currentProject['title']) ?>»</div>
-                                    <?php if ($parentChild['topic'] !== ''): ?>
-                                        <div class="student-header__topic">Тема проекта: <?= e($parentChild['topic']) ?></div>
-                                    <?php else: ?>
-                                        <div class="student-header__topic" style="color:var(--color-tertiary);font-weight:400;">Тема проекта ещё не выбрана</div>
-                                    <?php endif; ?>
+                                    <div class="student-header__meta">Группа <?= e($parentChild['group']) ?> · курс «<?= e($currentProject['title']) ?>» · проектов: <?= count($childProjectIds) ?></div>
                                 </div>
                             </div>
                         </section>
@@ -2218,7 +2550,7 @@ foreach ($mockStudents as $s) {
                         <section class="panel panel--tabs">
                             <div class="tabs" role="tablist">
                                 <button class="tab is-active" data-tab="journal" role="tab" aria-selected="true">📓 Журнал</button>
-                                <button class="tab" data-tab="project" role="tab" aria-selected="false">📋 Проект</button>
+                                <button class="tab" data-tab="project" role="tab" aria-selected="false">📋 Проекты</button>
                             </div>
 
                             <div class="tab-content is-active" data-tab-content="journal" role="tabpanel">
@@ -2278,46 +2610,81 @@ foreach ($mockStudents as $s) {
 
                             <div class="tab-content" data-tab-content="project" role="tabpanel">
                                 <p class="panel__subtitle" style="margin-bottom: var(--space-sm);">
-                                    Хронология проектных фаз вашего ребёнка. Возвраты к предыдущим фазам (↩) — это нормальный процесс доработки.
+                                    Проекты вашего ребёнка. Возвраты к предыдущим фазам (↩) — нормальный процесс доработки.
                                 </p>
 
-                                <?php if (empty($childHistory)): ?>
-                                    <div class="uni-empty">Пока нет записей по проекту.</div>
+                                <?php if ($childProjectIds === []): ?>
+                                    <div class="uni-empty">Пока нет записей по проектам.</div>
                                 <?php else: ?>
-                                    <div class="legend" style="margin: 0 0 var(--space-sm);">
-                                        <div class="phase-timeline">
-                                            <?php $prevNum = 0; ?>
-                                            <?php foreach ($childHistory as $idx => $h): ?>
-                                                <?php
-                                                $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
-                                                if (!$sp) continue;
-                                                $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
-                                                ?>
-                                                <?php if ($idx > 0): ?>
-                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"><?= $isReturn ? '↩' : '→' ?></span>
-                                                <?php endif; ?>
-                                                <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($h['note']) ?>">
-                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
-                                                </span>
-                                                <?php $prevNum = (int) $h['num']; ?>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
-
-                                    <div class="student-phases">
-                                        <?php foreach ($studentPhases as $sp): ?>
+                                    <div class="projects-grid">
+                                        <?php foreach ($childProjectIds as $pid): ?>
                                             <?php
-                                            $spNum = (int) $sp['num'];
-                                            $cls = 'student-phase-step--pending';
-                                            $label = 'Ожидает';
-                                            if ($spNum < $curStudentPhase) { $cls = 'student-phase-step--done'; $label = 'Завершён'; }
-                                            elseif ($spNum === $curStudentPhase) { $cls = 'student-phase-step--current'; $label = 'В работе'; }
+                                            $proj = $projectById[$pid] ?? null;
+                                            if (!$proj) continue;
+                                            $curPhase = project_current_phase($proj);
+                                            $type = $projectTypes[$proj['type']] ?? ['label' => $proj['type'], 'color' => '#8b6914', 'icon' => '📌'];
                                             ?>
-                                            <div class="student-phase-step <?= $cls ?>">
-                                                <div class="student-phase-step__num"><?= $spNum ?></div>
-                                                <div class="student-phase-step__name"><?= e($sp['name']) ?></div>
-                                                <div class="student-phase-step__status"><?= $label ?></div>
-                                            </div>
+                                            <article class="project-card" style="--type-color: <?= e($type['color']) ?>;">
+                                                <header class="project-card__head">
+                                                    <div>
+                                                        <div class="project-card__title"><?= e($proj['title']) ?></div>
+                                                        <div class="project-card__participants">
+                                                            <strong>Участники:</strong>
+                                                            <?php
+                                                            $names = [];
+                                                            foreach ($proj['students'] as $psid) {
+                                                                $st = $studentById[(int) $psid] ?? null;
+                                                                if (!$st) continue;
+                                                                $names[] = e($st['name']);
+                                                            }
+                                                            echo implode(', ', $names);
+                                                            ?>
+                                                        </div>
+                                                    </div>
+                                                    <span class="project-type-chip" style="--type-color: <?= e($type['color']) ?>;">
+                                                        <?= $type['icon'] ?> <?= e($type['label']) ?>
+                                                    </span>
+                                                </header>
+
+                                                <div class="project-card__section-label">Текущая фаза</div>
+                                                <div class="project-card__stepper">
+                                                    <?php foreach ($studentPhases as $sp): ?>
+                                                        <?php
+                                                        $spNum = (int) $sp['num'];
+                                                        $cls = 'step-mini--pending';
+                                                        if ($spNum < $curPhase) $cls = 'step-mini--done';
+                                                        elseif ($spNum === $curPhase) $cls = 'step-mini--current';
+                                                        ?>
+                                                        <div class="step-mini <?= $cls ?>">
+                                                            <span class="step-mini__num"><?= $spNum ?></span>
+                                                            <span class="step-mini__name"><?= e($sp['name']) ?></span>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+
+                                                <?php if (!empty($proj['history'])): ?>
+                                                    <div>
+                                                        <div class="project-card__section-label">История фаз</div>
+                                                        <div class="phase-timeline">
+                                                            <?php $prevNum = 0; ?>
+                                                            <?php foreach ($proj['history'] as $idx => $h): ?>
+                                                                <?php
+                                                                $sp = $studentPhaseByNum[(int) $h['num']] ?? null;
+                                                                if (!$sp) continue;
+                                                                $isReturn = $prevNum > 0 && (int) $h['num'] < $prevNum;
+                                                                ?>
+                                                                <?php if ($idx > 0): ?>
+                                                                    <span class="phase-arrow <?= $isReturn ? 'phase-arrow--return' : '' ?>"><?= $isReturn ? '↩' : '→' ?></span>
+                                                                <?php endif; ?>
+                                                                <span class="phase-chip" style="--phase-color: <?= e($sp['color']) ?>;" title="<?= e($h['note']) ?>">
+                                                                    <span class="phase-chip__num"><?= (int) $sp['num'] ?></span><?= e($sp['name']) ?><span class="phase-chip__date"><?= e($h['date']) ?></span>
+                                                                </span>
+                                                                <?php $prevNum = (int) $h['num']; ?>
+                                                            <?php endforeach; ?>
+                                                        </div>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </article>
                                         <?php endforeach; ?>
                                     </div>
                                 <?php endif; ?>
@@ -2625,13 +2992,13 @@ foreach ($mockStudents as $s) {
             +   '<div class="note-popover__mark" id="np-mark">—</div>'
             + '</div>'
             + '<label class="note-popover__label" for="np-textarea">Заметка преподавателя</label>'
-            + '<textarea class="note-popover__textarea" id="np-textarea" placeholder="Например: разобрать подробнее тему, дать индивидуальное задание..."></textarea>'
+            + '<textarea class="note-popover__textarea" id="np-textarea" placeholder="Например: разобрать подробнее тему..."></textarea>'
             + '<div class="note-popover__actions">'
             +   '<button type="button" class="note-popover__btn note-popover__btn--danger" id="np-delete">Удалить</button>'
             +   '<button type="button" class="note-popover__btn" id="np-cancel">Отмена</button>'
             +   '<button type="button" class="note-popover__btn note-popover__btn--primary" id="np-save">Сохранить</button>'
             + '</div>'
-            + '<div class="note-popover__hint">Заметку можно привязать к оценке, к «·» (присутствовал без оценки) или к «н».</div>';
+            + '<div class="note-popover__hint">Заметку можно привязать к оценке, к «·» или к «н».</div>';
         document.body.appendChild(popover);
 
         var npStudent = document.getElementById('np-student');
@@ -2749,7 +3116,6 @@ foreach ($mockStudents as $s) {
     (function () {
         'use strict';
 
-        // ===== Табы =====
         var tabs = document.querySelectorAll('.tab[data-tab]');
         var contents = document.querySelectorAll('.tab-content[data-tab-content]');
         tabs.forEach(function (tab) {
@@ -2760,7 +3126,6 @@ foreach ($mockStudents as $s) {
             });
         });
 
-        // ===== Журнал студента: выбор даты =====
         var lessonsJson = document.getElementById('student-lessons-json');
         var datesJson = document.getElementById('student-dates-json');
         if (!lessonsJson || !datesJson) return;
@@ -3142,6 +3507,67 @@ foreach ($mockStudents as $s) {
     })();
     </script>
     <?php endif; ?>
+
+    <!-- ===== Пометка об отсутствии рекомендательных технологий ===== -->
+    <footer class="no-reco-note" role="note" aria-label="Уведомление об отсутствии рекомендательных технологий">
+        <span class="no-reco-note__icon" aria-hidden="true">ⓘ</span>
+        <span>
+            Сервис <strong>не использует рекомендательные технологии</strong>
+            при предоставлении информации и не применяет профилирование пользователей.
+        </span>
+    </footer>
+
+    <!-- ===== Cookie-плашка ===== -->
+    <div class="cookie-banner" id="cookie-banner" role="dialog" aria-live="polite" aria-label="Использование cookie-файлов">
+        <div class="cookie-banner__icon" aria-hidden="true">🍪</div>
+        <div class="cookie-banner__body">
+            <div class="cookie-banner__title">Мы используем cookie-файлы</div>
+            <div class="cookie-banner__text">
+                Сайт использует <strong>технические cookie-файлы</strong> для корректной работы
+                авторизации и интерфейса. Персональные данные не передаются третьим лицам.
+                Рекомендательные технологии не применяются.
+                Продолжая пользоваться сервисом, вы соглашаетесь с использованием cookie.
+            </div>
+        </div>
+        <div class="cookie-banner__actions">
+            <button type="button" class="cookie-banner__btn cookie-banner__btn--ghost" id="cookie-banner-decline">
+                Только необходимые
+            </button>
+            <button type="button" class="cookie-banner__btn" id="cookie-banner-accept">
+                Принять
+            </button>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        'use strict';
+
+        var KEY = 'rtk_cookie_consent_v1';
+        var banner = document.getElementById('cookie-banner');
+        if (!banner) return;
+
+        var acceptBtn  = document.getElementById('cookie-banner-accept');
+        var declineBtn = document.getElementById('cookie-banner-decline');
+
+        var stored = null;
+        try { stored = window.localStorage.getItem(KEY); } catch (e) { stored = null; }
+
+        if (!stored) {
+            setTimeout(function () { banner.classList.add('is-visible'); }, 400);
+        }
+
+        function close(value) {
+            try { window.localStorage.setItem(KEY, value); } catch (e) {}
+            banner.style.opacity = '0';
+            banner.style.transform = 'translateY(12px)';
+            setTimeout(function () { banner.classList.remove('is-visible'); }, 220);
+        }
+
+        acceptBtn.addEventListener('click', function () { close('accepted'); });
+        declineBtn.addEventListener('click', function () { close('essential_only'); });
+    })();
+    </script>
 <?php endif; ?>
 </body>
 </html>
