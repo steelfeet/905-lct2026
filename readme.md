@@ -1,10 +1,11 @@
 # CRM «ИТ Школа РТК» — двунаправленный контроль обучения
 
 ## 0. Авторизация
+[Прототип](https://steelfeet.ru/submodules/905-lct2026/index.php)  
 login: Ivan  
 pass: 1111  
 role: Менеджер - в прототипе ролевая система отключена, можно переключаться между ролями / ВУЗами / студентами.  
-
+[Презентация](https://docs.google.com/presentation/d/1AeXv8vbCT2SVl6DLnqqkIcZl3owC_eyv/edit?usp=drive_link&ouid=116933120888160536021&rtpof=true&sd=true)
 
 ## 1. О продукте
 
