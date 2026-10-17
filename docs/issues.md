@@ -4,6 +4,9 @@ https://steelfeet.ru/submodules/905-lct2026/init_universities.php
 https://steelfeet.ru/submodules/905-lct2026/index.php
 
 
+тестирование
+v.0.6.2.lct2026:22 [tests] [905-lct2026]
+
 Авторизация через Keycloak (OIDC) с адаптером для shared-хостинга
 v.0.6.2.lct2026:20 [Keycloak] [905-lct2026]
 

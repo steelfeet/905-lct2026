@@ -202,3 +202,48 @@ CRM-система для контроля и обработки статист�
 ## 12. Быстрый старт
 
 Просто загрузите файлы из этого репозитория себе на сервер в любую удобную папку. Прототип CMR будет доступен по адресу https://ваш_сайт/ваша_папка/
+
+## 13. Тесты
+
+Покрытие: unit (PHPUnit), функциональные HTTP-тесты, безопасность и нагрузка (k6).
+
+### Что проверяется
+- **Unit** — чистые функции workflow (`phase_requires_confirmation`,
+  `build_project_workflow`), утилиты (`e()`, `uni_initial`, `project_point`),
+  агрегация журнала (`aggregate_journal`).
+- **Функциональные** — сквозной login через Keycloak-stub, доступ по 5 ролям,
+  двунаправленный workflow (менеджер → pending → вуз подтвердил/отклонил),
+  запрет не-соседних переходов фаз.
+- **Безопасность** — отсутствие отражения XSS в HTML, отказ callback при
+  неверном `state` (CSRF), каст `uni_id` в int (SQLi), регенерация
+  Session ID после логина (session fixation), запрет мутаций без сессии.
+- **Нагрузка (k6)** — 50 параллельных пользователей с откликом p95 < 1 с,
+  10 параллельных отчётов с p95 < 3 с, отсутствие полной перезагрузки
+  при смене статуса.
+
+### Запуск
+
+    composer install
+    vendor/bin/phpunit --testsuite unit
+    vendor/bin/phpunit --testsuite functional --testsuite security
+
+    # Нагрузка (нужен php-fpm + nginx, php -S не годится)
+    docker compose -f docker-compose.test.yml up -d
+    docker run --rm -i --network host -e BASE_URL=http://localhost:8080 \
+      grafana/k6 run - < tests/Load/k6-basic.js
+    docker run --rm -i --network host -e BASE_URL=http://localhost:8080 \
+      grafana/k6 run - < tests/Load/k6-reports.js
+
+### Трассировка NFR
+Ключевые нефункциональные требования из ТЗ (50 пользователей, <1 с, 10 отчётов,
+no full reload) закрыты нагрузочными тестами с явными порогами — см.
+`tests/Load/README.md`. Требования по 152-ФЗ и приказу ФСТЭК №117 — тестами
+безопасности.
+
+### Что не покрыто (осознанно)
+- Экспорт XLS/XLSX/PDF — в прототипе не реализован; при появлении endpoint
+  добавить функциональный тест и нагрузочный профиль.
+- Реальный Keycloak — тесты гоняют stub; перед продом — smoke против
+  реального realm.
+- Интеграция с LMS и сайтом на Laravel — контракты не предоставлены,
+  тестов нет.
