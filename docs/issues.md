@@ -4,6 +4,9 @@ https://steelfeet.ru/submodules/905-lct2026/init_universities.php
 https://steelfeet.ru/submodules/905-lct2026/index.php
 
 
+разбили монолит index.php на модули
+v.0.6.2.lct2026:23 [small_index] [905-lct2026]
+
 тестирование
 v.0.6.2.lct2026:22 [tests] [905-lct2026]
 
