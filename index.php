@@ -18,6 +18,9 @@
  *   - несколько студентов могут работать над одним проектом одновременно;
  *   - проекты бывают разных типов (доклад, интерактив, код и т.п.).
  *
+ * Авторизация: OIDC через Keycloak-контракт (на хакатоне — keycloak-stub,
+ * на собственной инфраструктуре — реальный Keycloak, код не меняется).
+ *
  * Cookie-плашка и пометка об отсутствии рекомендательных технологий
  * показываются авторизованным пользователям.
  */
@@ -25,10 +28,94 @@
 session_start();
 
 require __DIR__ . '/db.php';
+require_once __DIR__ . '/auth/oidc.php';
 
 $pdo = db();
 
 $action = $_GET['action'] ?? '';
+
+$error = '';
+
+// =============================================================================
+// OIDC: инициация входа — редирект на Keycloak (или keycloak-stub)
+// =============================================================================
+if ($action === 'oidc_login') {
+    $state = bin2hex(random_bytes(16));
+    $_SESSION['oidc_state'] = $state;
+
+    $loginHint = $_GET['login_hint'] ?? '';
+
+    header('Location: ' . oidc_login_url($state, $loginHint));
+    exit;
+}
+
+// =============================================================================
+// OIDC: callback — обмен code на JWT и вход в систему
+// =============================================================================
+if ($action === 'oidc_callback') {
+    $code  = $_GET['code']  ?? '';
+    $state = $_GET['state'] ?? '';
+
+    $expectedState = $_SESSION['oidc_state'] ?? '';
+    unset($_SESSION['oidc_state']);
+
+    if ($code === '' || $state === '' || !hash_equals($expectedState, $state)) {
+        $error = 'Ошибка авторизации (state mismatch). Попробуйте снова.';
+    } else {
+        $tokens = oidc_exchange_code($code);
+
+        if (!$tokens || empty($tokens['access_token'])) {
+            $error = 'Не удалось получить токен от Keycloak.';
+        } else {
+            $oidcUser = oidc_user_from_jwt($tokens['access_token']);
+
+            if (!$oidcUser || empty($oidcUser['login'])) {
+                $error = 'Некорректный токен.';
+            } else {
+                $stmt = $pdo->prepare('SELECT * FROM users WHERE login = :login AND is_active = 1');
+                $stmt->execute([':login' => $oidcUser['login']]);
+                $dbUser = $stmt->fetch();
+
+                if ($dbUser) {
+                    session_regenerate_id(true);
+                    $_SESSION['user_id']           = (int) $dbUser['id'];
+                    $_SESSION['oidc_access_token'] = $tokens['access_token'];
+                    $_SESSION['oidc_roles']        = $oidcUser['roles'];
+                    header('Location: index.php');
+                    exit;
+                }
+
+                $error = 'Пользователь «' . $oidcUser['login'] . '» не найден в системе.';
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Выход
+// =============================================================================
+if (isset($_GET['logout'])) {
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(
+            session_name(),
+            '',
+            time() - 42000,
+            $params['path'],
+            $params['domain'],
+            $params['secure'],
+            $params['httponly']
+        );
+    }
+    session_destroy();
+    header('Location: index.php');
+    exit;
+}
+
+// =============================================================================
+// Обработчики перемещения фазы (существующая логика)
+// =============================================================================
 
 function phase_requires_confirmation(int $num): bool
 {
@@ -121,32 +208,9 @@ if (($action === 'confirm_phase' || $action === 'reject_phase') && $_SERVER['REQ
     exit;
 }
 
-$error = '';
-
-if (isset($_GET['logout'])) {
-    session_destroy();
-    header('Location: index.php');
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === '') {
-    $login    = trim($_POST['login'] ?? '');
-    $password = $_POST['password'] ?? '';
-    if ($login === '' || $password === '') {
-        $error = 'Укажите логин и пароль.';
-    } else {
-        $stmt = $pdo->prepare('SELECT * FROM users WHERE login = :login AND is_active = 1');
-        $stmt->execute([':login' => $login]);
-        $user = $stmt->fetch();
-        if ($user && password_verify($password, $user['password'])) {
-            session_regenerate_id(true);
-            $_SESSION['user_id'] = (int) $user['id'];
-            header('Location: index.php');
-            exit;
-        }
-        $error = 'Неверный логин или пароль.';
-    }
-}
+// =============================================================================
+// Загрузка справочников и данных
+// =============================================================================
 
 $allRoles     = $pdo->query('SELECT code, name FROM roles ORDER BY id')->fetchAll();
 $universities = $pdo->query('SELECT id, name FROM universities ORDER BY id')->fetchAll();
@@ -797,7 +861,7 @@ $universityNotification = $_SESSION['university_notification'] ?? null;
 $managerNotification = $_SESSION['manager_notification'] ?? null;
 if ($managerNotification !== null) unset($_SESSION['manager_notification']);
 
-$managerLabel = $currentUser !== null ? ($currentUser['full_name'] ?: $currentUser['login']) : 'Павел';
+$managerLabel = $currentUser !== null ? ($currentUser['full_name'] ?: $currentUser['login']) : 'Менеджер';
 
 $viewStudentId = (int) ($_GET['student_id'] ?? 0);
 if ($viewRole === 'student' && $viewStudentId === 0 && $mockStudents !== []) $viewStudentId = (int) $mockStudents[0]['id'];
@@ -849,29 +913,58 @@ $selectedStudent = $studentById[$viewStudentId] ?? null;
         a:hover { color: var(--color-accent); }
 
         .auth-body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background-color: var(--color-light); padding: var(--space-lg); }
-        .auth-card { background-color: var(--color-white); border: 1px solid rgba(26, 26, 26, 0.1); padding: var(--space-xl); width: 100%; max-width: 420px; }
+        .auth-card { background-color: var(--color-white); border: 1px solid rgba(26, 26, 26, 0.1); padding: var(--space-xl); width: 100%; max-width: 460px; }
         .auth-card__brand { font-size: 2rem; font-weight: 600; text-align: center; margin-bottom: var(--space-xs); }
         .auth-card__subtitle { font-size: 0.9rem; color: var(--color-accent); text-align: center; margin-bottom: var(--space-lg); font-weight: 500; }
-        .auth-form label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: var(--space-xs); color: var(--color-secondary); }
-
-        .auth-form input[type="text"],
-        .auth-form input[type="password"],
-        .auth-form select {
-            width: 100%; padding: 0.75rem var(--space-sm);
-            border: 1px solid rgba(26, 26, 26, 0.15);
-            background-color: var(--color-white); color: var(--color-primary);
-            font-family: var(--font-sans); font-size: 0.95rem;
-            margin-bottom: var(--space-md); transition: var(--transition-base);
-        }
-        .auth-form input:focus, .auth-form select:focus { outline: none; border-color: var(--color-accent); }
-        .auth-form button {
-            width: 100%; padding: var(--space-sm);
-            background-color: var(--color-accent); color: var(--color-white);
-            border: none; font-family: var(--font-sans); font-size: 1rem; font-weight: 500;
-            cursor: pointer; transition: var(--transition-base);
-        }
-        .auth-form button:hover { background-color: var(--color-accent-light); }
         .auth-error { background-color: #fdf3f2; color: #9b2c1f; border-left: 2px solid #9b2c1f; padding: 0.75rem var(--space-sm); font-size: 0.85rem; margin-bottom: var(--space-md); }
+
+        .auth-oidc-hint {
+            font-size: 0.85rem;
+            color: var(--color-tertiary);
+            margin-bottom: var(--space-md);
+            line-height: 1.5;
+        }
+        .auth-oidc-hint strong { color: var(--color-accent-dark); }
+
+        .auth-roles {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: var(--space-md);
+        }
+
+        .auth-role-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: var(--color-white);
+            border: 1px solid rgba(26, 26, 26, 0.15);
+            border-left: 3px solid var(--color-accent);
+            color: var(--color-primary);
+            font-family: var(--font-sans);
+            font-size: 0.92rem;
+            font-weight: 500;
+            transition: var(--transition-base);
+        }
+        .auth-role-btn:hover {
+            background: rgba(139, 105, 20, 0.06);
+            border-left-color: var(--color-accent-light);
+            color: var(--color-primary);
+        }
+
+        .auth-role-btn__icon {
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+
+        .auth-oidc-note {
+            font-size: 0.75rem;
+            color: var(--color-tertiary);
+            line-height: 1.5;
+            padding-top: var(--space-sm);
+            border-top: 1px solid rgba(26, 26, 26, 0.08);
+        }
 
         .dashboard { display: flex; flex-direction: column; min-height: 100vh; }
 
@@ -1602,20 +1695,44 @@ $selectedStudent = $studentById[$viewStudentId] ?? null;
     <div class="auth-card">
         <h1 class="auth-card__brand">Кладезь</h1>
         <p class="auth-card__subtitle">CRM «ИТ Школа РТК» — вход в систему</p>
-        <?php if ($error !== ''): ?><div class="auth-error"><?= e($error) ?></div><?php endif; ?>
-        <form class="auth-form" method="post" action="index.php">
-            <label for="login">Логин</label>
-            <input type="text" id="login" name="login" autocomplete="username" autofocus value="<?= e((string) ($_POST['login'] ?? '')) ?>">
-            <label for="password">Пароль</label>
-            <input type="password" id="password" name="password" autocomplete="current-password">
-            <label for="role">Роль</label>
-            <select id="role" name="role">
-                <?php foreach ($allRoles as $role): ?>
-                    <option value="<?= e($role['code']) ?>"><?= e($role['name']) ?></option>
-                <?php endforeach; ?>
-            </select>
-            <button type="submit">Войти</button>
-        </form>
+
+        <?php if ($error !== ''): ?>
+            <div class="auth-error"><?= e($error) ?></div>
+        <?php endif; ?>
+
+        <p class="auth-oidc-hint">
+            Авторизация через <strong>Keycloak</strong> (OIDC).
+            Выберите роль для входа в демо:
+        </p>
+
+        <div class="auth-roles">
+            <a class="auth-role-btn" href="index.php?action=oidc_login&login_hint=manager">
+                <span class="auth-role-btn__icon">📋</span>
+                <span>Менеджер</span>
+            </a>
+            <a class="auth-role-btn" href="index.php?action=oidc_login&login_hint=supervisor">
+                <span class="auth-role-btn__icon">🧭</span>
+                <span>Руководитель</span>
+            </a>
+            <a class="auth-role-btn" href="index.php?action=oidc_login&login_hint=university_rep">
+                <span class="auth-role-btn__icon">🎓</span>
+                <span>Представитель ВУЗа</span>
+            </a>
+            <a class="auth-role-btn" href="index.php?action=oidc_login&login_hint=student">
+                <span class="auth-role-btn__icon">🎒</span>
+                <span>Студент</span>
+            </a>
+            <a class="auth-role-btn" href="index.php?action=oidc_login&login_hint=parent">
+                <span class="auth-role-btn__icon">👪</span>
+                <span>Родитель</span>
+            </a>
+        </div>
+
+        <p class="auth-oidc-note">
+            Сессия подтверждена цифровой подписью JWT.
+            После входа CRM и LMS используют один и тот же токен —
+            это сквозная авторизация.
+        </p>
     </div>
 <?php else: ?>
     <div class="dashboard">

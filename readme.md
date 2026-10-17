@@ -128,6 +128,44 @@ CRM-система для контроля и обработки статист�
 - Ограничение типов файлов и размеров.
 - Разграничение доступа к отчётам и справочникам.
 - Отсутствие хранения паролей в системе.
+### Авторизация: Keycloak (OIDC) + адаптер для shared-хостинга
+
+Вход построен на OpenID Connect, Authorization Code Flow. Вся работа с провайдером вынесена в тонкий адаптер auth/oidc.php, в index.php остаются только два обработчика — action=oidc_login и action=oidc_callback.
+
+Поток входа
+
+    На экране входа кнопка роли ведёт на index.php?action=oidc_login&login_hint=<роль>.
+
+    Генерируется криптостойкий state (random_bytes(16)), кладётся в сессию; пользователь редиректится на провайдера через oidc_login_url($state, $loginHint).
+
+    Провайдер возвращает code и state на action=oidc_callback. state сверяется с сессионным через hash_equals — защита от CSRF и подмены callback.
+
+    oidc_exchange_code($code) меняет код на access_token.
+
+    oidc_user_from_jwt($access_token) разбирает JWT и достаёт login и roles.
+
+    По login пользователь ищется в БД (users.is_active = 1), сессия перегенерируется (session_regenerate_id(true)) — защита от session fixation.
+
+    В сессию кладутся user_id, oidc_access_token, oidc_roles. Дальше $currentUser подтягивает актуальную роль из user_roles / roles.
+
+Зачем адаптер, а не «жёсткий» Keycloak. Прототип живёт на shared-хостинге, где нельзя поднять собственный Keycloak. Поэтому auth/oidc.php — это контракт из трёх функций (oidc_login_url, oidc_exchange_code, oidc_user_from_jwt), за которым стоит либо:
+
+    - keycloak-stub — учебный эмулятор: принимает login_hint, выдаёт code и подписанный JWT с тем же набором claims. Используется на хакатоне.
+
+    - реальный Keycloak — поднимается в docker-compose (см. раздел «Архитектура»), realm и client настраиваются один раз.
+
+При переключении код приложения не меняется — правится только конфиг адаптера. Это даёт:
+
+    - сквозную авторизацию CRM и LMS по одному JWT (один и тот же токен валиден в обеих системах);
+
+    - нулевую миграцию прототипа в прод — меняется только адаптер, не index.php;
+
+    - явное закрытие п. 10 («реализация авторизации через keycloak») и п. 11 («ролевая модель») ТЗ.
+
+Выход — index.php?logout=1: очистка $_SESSION, гашение cookie сессии с теми же path / domain / secure / httponly, session_destroy(), редирект на экран входа. Logout локальный, без back-channel к провайдеру — для прототипа этого достаточно, для прода добавляется end-session endpoint в адаптер.
+
+Роли. На экране входа пять кнопок (manager, supervisor, university_rep, student, parent) — это login_hint для stub-а. В проде login_hint не нужен: роли приходят в JWT (oidc_roles) и маппятся на roles в БД, а интерфейс строится по viewRole из запроса. Базовая ролевая модель ТЗ (Пользователь / Руководитель / Администратор) расширена внешними ролями (Представитель вуза / Преподаватель / Студент / Родитель) — это и есть двунаправленность, описанная в разделе 3.
+
 
 ## 8. Интеграции
 

@@ -1,0 +1,13 @@
+# Все запросы внутри /keycloak-stub/ уходят в index.php,
+# чтобы URL совпадали с Keycloak: /realms/{realm}/protocol/openid-connect/...
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ index.php [QSA,L]
+</IfModule>
+
+# Запрет на прямой доступ к keys.php (используется только внутри index.php)
+<Files "keys.php">
+    Require all denied
+</Files>
