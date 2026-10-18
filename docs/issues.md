@@ -4,6 +4,9 @@ https://steelfeet.ru/submodules/905-lct2026/init_universities.php
 https://steelfeet.ru/submodules/905-lct2026/index.php
 
 
+более "мягкие" цвета стикеров фазы проектов
+v.0.6.2.lct2026:25 [colors] [905-lct2026]
+
 инициализация БД
 v.0.6.2.lct2026:24 [db] [905-lct2026]
 

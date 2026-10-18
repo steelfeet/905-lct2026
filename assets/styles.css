@@ -208,36 +208,105 @@ table.matrix td { color: var(--color-primary); font-weight: 500; cursor: default
 table.matrix td.empty { background-color: var(--color-white); color: rgba(26, 26, 26, 0.25); padding: 0.4rem 0.3rem; }
 table.matrix td.phase { padding: 3px; }
 
+/* =============================================================================
+   Стикер фазы: приглушённая палитра.
+   Цвет фазы (--phase-color) сохраняется, но поверх наложена белая плёнка 55%.
+   Номер — тёмный (#1f1f1f), чтобы читаться на пастельном фоне.
+   Тени и hover — мягче, без «агрессии».
+   ============================================================================= */
 table.matrix td.phase .sticker-cell {
-    position: relative; display: flex; align-items: center; justify-content: center;
-    width: 100%; height: 100%; min-height: 42px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    min-height: 42px;
+
     background-color: var(--phase-color, #fde68a);
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.08) 45%, rgba(0, 0, 0, 0.10) 100%);
+    /* 1-й слой — белая плёнка (уводит в пастель),
+       2-й слой — лёгкий объём: светлый верх, едва заметный низ */
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55)),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.04) 100%);
+
     border-radius: 2px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15), 0 2px 6px rgba(0, 0, 0, 0.08);
-    font-weight: 700; color: #ffffff; font-size: 1rem;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.08),
+        0 1px 4px rgba(0, 0, 0, 0.04);
+
+    font-weight: 600;
+    color: #1f1f1f;
+    font-size: 0.95rem;
+    letter-spacing: 0.01em;
+    text-shadow: none;
+
     transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, opacity 0.2s;
     overflow: hidden;
 }
+
+/* «Скотч» сверху — на пастельном фоне сделан чуть плотнее, иначе пропадает */
 table.matrix td.phase .sticker-cell::before {
-    content: ''; position: absolute; top: -2px; left: 50%; width: 22px; height: 8px;
-    margin-left: -11px; background: rgba(255, 255, 255, 0.55);
-    border: 1px solid rgba(0, 0, 0, 0.04); transform: rotate(-2deg); border-radius: 1px;
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 50%;
+    width: 22px;
+    height: 8px;
+    margin-left: -11px;
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(0, 0, 0, 0.03);
+    transform: rotate(-2deg);
+    border-radius: 1px;
 }
+
 table.matrix td.clickable { cursor: grab; }
 table.matrix td.clickable:active { cursor: grabbing; }
-table.matrix td.clickable:hover .sticker-cell { transform: translateY(-2px) rotate(-1.5deg); box-shadow: 0 3px 6px rgba(0, 0, 0, 0.18), 0 6px 14px rgba(0, 0, 0, 0.12); }
-table.matrix td.is-current-project .sticker-cell { box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2), 0 8px 18px rgba(0, 0, 0, 0.16), inset 0 0 0 3px var(--color-accent-dark); transform: rotate(-2deg) scale(1.05); }
-table.matrix td.is-current-project .sticker-cell::after { content: '◆'; position: absolute; top: 1px; right: 3px; font-size: 0.55rem; line-height: 1; color: #ffffff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
-table.matrix td.is-pending .sticker-cell { animation: pulse-pending 1.8s ease-in-out infinite; outline: 2px dashed #b45309; outline-offset: -2px; }
-@keyframes pulse-pending {
-    0%, 100% { box-shadow: 0 1px 2px rgba(0,0,0,0.15), 0 0 0 0 rgba(180, 83, 9, 0.5); }
-    50%      { box-shadow: 0 1px 2px rgba(0,0,0,0.15), 0 0 0 10px rgba(180, 83, 9, 0); }
+table.matrix td.clickable:hover .sticker-cell {
+    transform: translateY(-1px) rotate(-1deg);
+    box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.10),
+        0 4px 10px rgba(0, 0, 0, 0.06);
 }
+
+table.matrix td.is-current-project .sticker-cell {
+    box-shadow:
+        0 2px 4px rgba(0, 0, 0, 0.12),
+        0 4px 12px rgba(0, 0, 0, 0.08),
+        inset 0 0 0 2px rgba(26, 26, 26, 0.6);
+    transform: rotate(-1.5deg) scale(1.02);
+}
+table.matrix td.is-current-project .sticker-cell::after {
+    content: '◆';
+    position: absolute;
+    top: 1px;
+    right: 3px;
+    font-size: 0.55rem;
+    line-height: 1;
+    color: #1f1f1f;
+    text-shadow: none;
+}
+
+table.matrix td.is-pending .sticker-cell {
+    animation: pulse-pending 1.8s ease-in-out infinite;
+    outline: 2px dashed rgba(180, 83, 9, 0.65);
+    outline-offset: -2px;
+}
+@keyframes pulse-pending {
+    0%, 100% { box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 0 0 0 rgba(180, 83, 9, 0.35); }
+    50%      { box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 0 0 8px rgba(180, 83, 9, 0); }
+}
+
 body.is-dragging table.matrix td.phase .sticker-cell { opacity: 0.35; filter: grayscale(0.4); }
 body.is-dragging table.matrix td.is-drag-source { z-index: 100; overflow: visible; }
-body.is-dragging table.matrix td.is-drag-source .sticker-cell { opacity: 1; filter: none; transform: rotate(-7deg) scale(1.25) translateZ(60px); box-shadow: 0 10px 20px rgba(0, 0, 0, 0.28), 0 24px 48px rgba(0, 0, 0, 0.22); }
+body.is-dragging table.matrix td.is-drag-source .sticker-cell {
+    opacity: 1;
+    filter: none;
+    transform: rotate(-5deg) scale(1.18) translateZ(60px);
+    box-shadow:
+        0 6px 12px rgba(0, 0, 0, 0.18),
+        0 16px 32px rgba(0, 0, 0, 0.14);
+}
 
 .phase-pocket {
     position: fixed; z-index: 10000; width: 240px; padding: 10px 12px 12px;
